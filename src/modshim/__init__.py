@@ -141,21 +141,35 @@ class MergedModuleLoader(Loader):
             # Handle relative imports within the merged module namespace
             if level > 0 and globals:
                 package = globals.get("__package__", "")
-                if package.startswith(self.merged_name):
-                    # Calculate absolute import path
+                
+                # If this is an import from the lower module
+                if package == self.lower_name or package.startswith(self.lower_name + "."):
+                    # Map it to our merged namespace
+                    merged_package = self.merged_name + package[len(self.lower_name):]
+                    
+                    if level > 1:
+                        package_parts = merged_package.split(".")
+                        merged_name = ".".join(package_parts[:-level+1] + ([name] if name else []))
+                    else:
+                        merged_name = merged_package + ("." + name if name else "")
+                        
+                    # Import through our merged module system
+                    return importlib.import_module(merged_name)
+                    
+                # Handle existing merged module relative imports
+                elif package.startswith(self.merged_name):
                     if level > 1:
                         package_parts = package.split(".")
-                        name = ".".join(package_parts[: -level + 1] + ([name] if name else []))
+                        name = ".".join(package_parts[:-level+1] + ([name] if name else []))
                     else:
                         name = package + ("." + name if name else "")
-
-                    # Import through our merged module system
+                        
                     return importlib.import_module(name)
 
             # For absolute imports, check if we're importing from the target module
             if name == self.lower_name or name.startswith(self.lower_name + "."):
                 # Redirect to merged module
-                merged_name = self.merged_name + name[len(self.lower_name) :]
+                merged_name = self.merged_name + name[len(self.lower_name):]
                 return importlib.import_module(merged_name)
 
             # Otherwise use normal import
