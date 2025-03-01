@@ -146,13 +146,14 @@ class MergedModuleLoader(Loader):
             level: int = 0,
         ) -> types.ModuleType:
             print(f"Custom import called: name={name}, level={level}, package={globals.get('__package__') if globals else None}, fromlist={fromlist}")
-            # Handle relative imports within the merged module namespace
+            
+            # For relative imports, we need to handle them in the context of their package
             if level > 0 and globals:
                 package = globals.get("__package__", "")
                 
-                # If this is an import from the lower module
+                # If import is happening from within lower module
                 if package == self.lower_name or package.startswith(self.lower_name + "."):
-                    # Map it to our merged namespace
+                    # Calculate the absolute name in our merged namespace
                     merged_package = self.merged_name + package[len(self.lower_name):]
                     
                     if level > 1:
@@ -160,8 +161,8 @@ class MergedModuleLoader(Loader):
                         merged_name = ".".join(package_parts[:-level+1] + ([name] if name else []))
                     else:
                         merged_name = merged_package + ("." + name if name else "")
-                        
-                    # Import through our merged module system
+
+                    # Create merged version of the submodule
                     return importlib.import_module(merged_name)
                     
                 # Handle existing merged module relative imports
@@ -186,6 +187,10 @@ class MergedModuleLoader(Loader):
         try:
             # Install custom import
             builtins.__import__ = custom_import
+            
+            # Re-import lower module with our import hook active
+            # This ensures internal imports go through our hook
+            importlib.reload(module._lower)
 
             # Copy attributes from lower first
             for name, value in vars(module._lower).items():
