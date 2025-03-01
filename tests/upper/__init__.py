@@ -1,1 +1,1 @@
-"""Example overlay modules used for testing."""
+"""Example overlay modules for modshim."""
