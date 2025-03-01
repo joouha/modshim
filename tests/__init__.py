@@ -1,7 +1,7 @@
 """Target package containing overlay modules."""
+
 from __future__ import annotations
 
-from . import upper
 from modshim import register
 
 # Register overlays
