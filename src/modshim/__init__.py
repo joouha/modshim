@@ -106,6 +106,7 @@ class MergedModuleLoader(Loader):
         self.cache = cache
 
     def create_module(self, spec: importlib.machinery.ModuleSpec) -> types.ModuleType:
+        print(f"Creating module for spec: {spec.name}")
         # If already merged, return from cache
         if spec.name in self.cache:
             return self.cache[spec.name]
@@ -128,6 +129,10 @@ class MergedModuleLoader(Loader):
         return merged
 
     def exec_module(self, module: types.ModuleType) -> None:
+        print(f"Executing module: {module.__name__}")
+        print(f"Upper module path: {self.upper_name}")
+        print(f"Lower module path: {self.lower_name}")
+        
         # Store original import
         original_import = builtins.__import__
 
@@ -138,6 +143,7 @@ class MergedModuleLoader(Loader):
             fromlist: tuple[str, ...] = (),
             level: int = 0,
         ) -> types.ModuleType:
+            print(f"Custom import called: name={name}, level={level}, globals={globals.get('__package__') if globals else None}")
             # Handle relative imports within the merged module namespace
             if level > 0 and globals:
                 package = globals.get("__package__", "")
@@ -276,6 +282,11 @@ def merge(upper: str, lower: str, as_name: str | None = None) -> types.ModuleTyp
         A new module that combines both modules, with upper taking precedence
     """
     merged_name = as_name or f"merged_{lower}"
+    print(f"Creating merged module: {merged_name}")
+    print(f"Upper module: {upper}")
+    print(f"Lower module: {lower}")
     finder = MergedModuleFinder(merged_name, upper, lower)
     sys.meta_path.insert(0, finder)
-    return importlib.import_module(merged_name)
+    merged = importlib.import_module(merged_name)
+    print(f"Merged module contents: {dir(merged)}")
+    return merged
