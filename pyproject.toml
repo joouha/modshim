@@ -1,0 +1,74 @@
+[project]
+name = "modshim"
+version = "0.1.0"
+description = "Override and customize third-party packages without touching their code."
+readme = "README.md"
+authors = [
+    { name = "Josiah Outram Halstead", email = "josiah@halstead.email" }
+]
+requires-python = ">=3.9"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pyright>=0.0.13.post0",
+    "pytest>=4.6.11",
+    "ruff>=0.0.17",
+]
+
+
+[tool.ruff.lint]
+select = [ # "ANN", "B", "C", "D", "E", "F", "I", "Q", "S", "T", "UP"]
+  "ANN",   #
+  "ASYNC", #
+  # "ARG",   # Unused arguments
+  "B",
+  "C",
+  "C4",
+  "D",
+  "E",
+  "F",
+  "FA",
+  "G",
+  "I",
+  "PIE", # miscellaneous lints
+  "PT",  # common style issues or inconsistencies with pytest-based tests
+  "PTH", # use pathlib
+  "Q",   # quotes
+  "S",   # bandit security testingi
+  "RUF", # ruff-specific
+  "SIM", # simplify
+  # "RET", # return values
+  "T",
+  "TCH", # type checking import blocks
+  "UP",
+  "W",
+]
+ignore = [
+    # Use of typing.Any
+    "ANN401",
+    # Function too complex
+    "C901",
+    # Use of assert
+    "S101",
+    # Line to long
+    "E501",
+    # Google style docstrings
+    "D203", "D204", "D213", "D215", "D400", "D404", "D406", "D407", "D408", "D409", "D413",
+    # Allow empty functions in ABCs
+    "B027",
+    # zip() without an explicit strict= parameter
+    "B905",
+    # Ignore subprocess warnings
+    "S603", "S607",
+    # Ignore ambiguous-unicode-character-string warning
+    "RUF001",
+    # Do not use `contextlib.suppress` instead of `try...except...pass`
+    "SIM105",
+    # Do not enforce ternary operators
+    "SIM108",
+]
