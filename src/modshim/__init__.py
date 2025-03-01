@@ -153,17 +153,24 @@ class MergedModuleLoader(Loader):
                 
                 # If import is happening from within lower module
                 if package == self.lower_name or package.startswith(self.lower_name + "."):
-                    # Calculate the absolute name in our merged namespace
-                    merged_package = self.merged_name + package[len(self.lower_name):]
-                    
+                    # Calculate the absolute name in both namespaces
                     if level > 1:
-                        package_parts = merged_package.split(".")
-                        merged_name = ".".join(package_parts[:-level+1] + ([name] if name else []))
+                        package_parts = package.split(".")
+                        lower_name = ".".join(package_parts[:-level+1] + ([name] if name else []))
                     else:
-                        merged_name = merged_package + ("." + name if name else "")
-
-                    # Create merged version of the submodule
-                    return importlib.import_module(merged_name)
+                        lower_name = package + ("." + name if name else "")
+                    
+                    # Now create corresponding merged name
+                    merged_name = self.merged_name + lower_name[len(self.lower_name):]
+                
+                    # Import through our merged module system
+                    try:
+                        # Try importing through original module first
+                        mod = importlib.import_module(lower_name)
+                        return mod
+                    except ImportError:
+                        # Fall back to merged module
+                        return importlib.import_module(merged_name)
                     
                 # Handle existing merged module relative imports
                 elif package.startswith(self.merged_name):
