@@ -32,31 +32,41 @@ class ModshimFinder(MetaPathFinder):
         target: Any = None,
     ) -> ModuleSpec | None:
         """Find and create module spec for overlay modules."""
+        print(f"ModshimFinder looking for: {fullname}")
+        print(f"Registered overlays: {_overlays}")
+        
         # Check if this is a registered overlay
         for lower, (upper, merge) in _overlays.items():
             if fullname == merge:
-                # Load the lower (base) module
-                base_module = __import__(lower)
-                
-                # Load the upper (overlay) module
-                overlay_module = __import__(upper)
-                for part in upper.split(".")[1:]:
-                    overlay_module = getattr(overlay_module, part)
-                
-                # Create merged module
-                merged = ModuleType(merge)
-                merged.__dict__.update(base_module.__dict__)
-                merged.__dict__.update(overlay_module.__dict__)
-                
-                # Add to sys.modules
-                sys.modules[merge] = merged
-                
-                # Create a dummy spec
-                return ModuleSpec(
-                    name=merge,
-                    loader=None,
-                    origin="modshim virtual module",
-                )
+                try:
+                    # Load the lower (base) module
+                    base_module = __import__(lower)
+                    
+                    # Load the upper (overlay) module - need to handle the full path
+                    parts = upper.split('.')
+                    overlay_module = __import__(parts[0])
+                    for part in parts[1:]:
+                        overlay_module = getattr(overlay_module, part)
+                    
+                    # Create merged module
+                    merged = ModuleType(merge)
+                    merged.__dict__.update(base_module.__dict__)
+                    merged.__dict__.update(overlay_module.__dict__)
+                    
+                    # Add to sys.modules before returning spec
+                    sys.modules[merge] = merged
+                    
+                    # Create a spec with a custom loader
+                    spec = ModuleSpec(
+                        name=merge,
+                        loader=None,  # We've already loaded the module
+                        origin="modshim virtual module",
+                    )
+                    spec._initializing = False  # Mark as already initialized
+                    return spec
+                except Exception as e:
+                    print(f"ModshimFinder error loading {merge}: {e}")
+                    raise
         return None
 
 # Install the import hook
