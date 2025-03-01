@@ -161,9 +161,15 @@ class MergedModuleLoader(Loader):
             # Copy attributes from lower first
             for name, value in vars(module._lower).items():
                 if not name.startswith("_"):
-                    if isinstance(value, type):
+                    if (isinstance(value, type) and 
+                        not isinstance(value, type(object)) and  # Skip built-in types
+                        not hasattr(value, '__slots__')):  # Skip types with slots
                         # Wrap classes to redirect their base class lookups
-                        value = create_class_proxy(value, module)
+                        try:
+                            value = create_class_proxy(value, module)
+                        except TypeError:
+                            # If we can't create a proxy, use original value
+                            pass
                     elif isinstance(value, types.FunctionType):
                         # Create new function with merged module's globals
                         new_globals = dict(value.__globals__)
