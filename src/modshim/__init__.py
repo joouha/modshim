@@ -9,47 +9,54 @@ from importlib.abc import Loader, MetaPathFinder
 from typing import Any, Mapping
 
 
-class ClassProxy:
-    """Proxies a class to redirect its base class lookups to the merged module."""
-
-    def __init__(self, orig_class: type, merged_module: types.ModuleType) -> None:
-        self.orig_class = orig_class
-        self.merged_module = merged_module
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self.orig_class(*args, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.orig_class, name)
-
-
-def create_class_proxy(orig_class: type, merged_module: types.ModuleType) -> type:
-    """Creates a proxy class that redirects base class lookups to merged module."""
-
-    class RedirectingClass(orig_class):  # type: ignore
-        def __new__(cls, *args: Any, **kwargs: Any) -> Any:
-            # When the class is instantiated, look up base classes in merged module
-            bases = []
-            for base in orig_class.__bases__:
-                if base.__module__ == merged_module._lower.__name__:
-                    # Get the corresponding class from merged module
-                    base_name = base.__name__
-                    redirected_base = getattr(merged_module, base_name)
-                    bases.append(redirected_base)
-                else:
-                    bases.append(base)
-
-            # Create a new class with redirected bases
-            redirected_class = type(
-                orig_class.__name__,
-                tuple(bases),
-                dict(orig_class.__dict__),
+def create_redirected_class(orig_class: type, merged_module: types.ModuleType) -> type:
+    """Creates a new class with redirected base classes and updated method references.
+    
+    Args:
+        orig_class: The original class to redirect
+        merged_module: The merged module containing redirected references
+        
+    Returns:
+        A new class with updated bases and method references
+    """
+    # Create new class with updated bases
+    bases = []
+    for base in orig_class.__bases__:
+        if base.__module__ == merged_module._lower.__name__:
+            redirected_base = getattr(merged_module, base.__name__)
+            bases.append(redirected_base)
+        else:
+            bases.append(base)
+            
+    # Create new class with updated namespace
+    namespace = dict(orig_class.__dict__)
+    
+    # Update any class-level references to lower module
+    for key, value in namespace.items():
+        if isinstance(value, types.FunctionType):
+            # Update method globals like we do for functions
+            new_globals = dict(value.__globals__)
+            new_globals["__name__"] = merged_module.__name__
+            new_globals["__package__"] = merged_module.__package__
+            
+            # Redirect module references
+            for k, v in new_globals.items():
+                if isinstance(v, types.ModuleType):
+                    if v.__name__ == merged_module._lower.__name__:
+                        new_globals[k] = merged_module
+                    elif v.__name__.startswith(merged_module._lower.__name__ + "."):
+                        merged_name = merged_module.__name__ + v.__name__[len(merged_module._lower.__name__):]
+                        new_globals[k] = sys.modules.get(merged_name)
+                        
+            namespace[key] = types.FunctionType(
+                value.__code__,
+                new_globals,
+                value.__name__,
+                value.__defaults__,
+                value.__closure__,
             )
-
-            # Return instance of the redirected class
-            return super(RedirectingClass, cls).__new__(redirected_class)
-
-    return RedirectingClass
+            
+    return type(orig_class.__name__, tuple(bases), namespace)
 
 
 class MergedModule(types.ModuleType):
@@ -164,11 +171,11 @@ class MergedModuleLoader(Loader):
                     if (isinstance(value, type) and 
                         not isinstance(value, type(object)) and  # Skip built-in types
                         not hasattr(value, '__slots__')):  # Skip types with slots
-                        # Wrap classes to redirect their base class lookups
+                        # Create redirected class with updated references
                         try:
-                            value = create_class_proxy(value, module)
+                            value = create_redirected_class(value, module)
                         except TypeError:
-                            # If we can't create a proxy, use original value
+                            # If we can't create redirected class, use original value
                             pass
                     elif isinstance(value, types.FunctionType):
                         # Create new function with merged module's globals
