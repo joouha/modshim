@@ -225,12 +225,15 @@ class MergedModuleFinder(MetaPathFinder):
         upper_fullname = (self.upper_name + relative_path) if relative_path else self.upper_name
         lower_fullname = (self.lower_name + relative_path) if relative_path else self.lower_name
 
+        # Create loader
+        loader = MergedModuleLoader(fullname, upper_fullname, lower_fullname, self.cache)
+
         # Create a spec for the merged module
-        return importlib.util.spec_from_file_location(
+        return importlib.util.spec_from_loader(
             fullname,
-            None,  # No actual file location
-            loader=MergedModuleLoader(fullname, upper_fullname, lower_fullname, self.cache),
-            is_package=True,  # Assume it's a package to allow submodules
+            loader,
+            origin=None,
+            is_package=True  # Allow submodules
         )
 
 
