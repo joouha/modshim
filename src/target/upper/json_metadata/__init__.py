@@ -3,10 +3,6 @@
 from json import dumps as original_dumps
 from typing import Any
 
-from modshim import overlay
-
-overlay = overlay("json")
-
 
 def dumps(obj: dict[str, Any], *args: Any, **kwargs: Any) -> str:
     """Serialize obj to a JSON formatted str with added metadata.

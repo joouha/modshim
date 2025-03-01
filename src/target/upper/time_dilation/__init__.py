@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import time as original_time
 
-from modshim import overlay
-
-overlay = overlay("time")
 
 # Time dilation factor (1.0 = normal time, 2.0 = twice as fast, 0.5 = half speed)
 _dilation_factor = 1.0

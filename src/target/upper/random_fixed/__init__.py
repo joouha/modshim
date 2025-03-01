@@ -5,9 +5,6 @@ from __future__ import annotations
 import random as original_random
 from typing import Any
 
-from modshim import overlay
-
-overlay = overlay("random")
 
 # Store the original Random class
 OriginalRandom = original_random.Random

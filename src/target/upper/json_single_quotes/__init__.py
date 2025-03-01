@@ -9,9 +9,6 @@ from .encoder import JSONEncoder
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from modshim import overlay
-
-overlay = overlay("json")
 
 _default_encoder = JSONEncoder(
     skipkeys=False,

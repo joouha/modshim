@@ -5,10 +5,6 @@ from __future__ import annotations
 from datetime import datetime as OriginalDateTime
 from datetime import tzinfo
 
-from modshim import overlay
-
-overlay = overlay("datetime")
-
 
 class datetime(OriginalDateTime):
     """Enhanced datetime class with weekend detection."""

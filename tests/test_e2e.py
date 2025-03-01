@@ -1,5 +1,7 @@
 """Test some realistic patching of stdlib modules."""
 
+import target
+
 
 def test_json_single_quotes_override() -> None:
     """Test that json strings are encoded with single quotes while preserving original behavior."""
