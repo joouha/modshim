@@ -132,6 +132,8 @@ class MergedModuleLoader(Loader):
         print(f"Executing module: {module.__name__}")
         print(f"Upper module path: {self.upper_name}")
         print(f"Lower module path: {self.lower_name}")
+        print(f"Lower module contents before: {dir(module._lower)}")
+        print(f"Upper module contents: {dir(module._upper)}")
         
         # Store original import
         original_import = builtins.__import__
@@ -143,7 +145,7 @@ class MergedModuleLoader(Loader):
             fromlist: tuple[str, ...] = (),
             level: int = 0,
         ) -> types.ModuleType:
-            print(f"Custom import called: name={name}, level={level}, globals={globals.get('__package__') if globals else None}")
+            print(f"Custom import called: name={name}, level={level}, package={globals.get('__package__') if globals else None}, fromlist={fromlist}")
             # Handle relative imports within the merged module namespace
             if level > 0 and globals:
                 package = globals.get("__package__", "")
@@ -231,6 +233,7 @@ class MergedModuleLoader(Loader):
 
         finally:
             # Restore original import
+            print(f"Lower module contents after: {dir(module._lower)}")
             builtins.__import__ = original_import
 
 
