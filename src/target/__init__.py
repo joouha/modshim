@@ -1,3 +1,7 @@
+"""Target package containing overlay modules."""
+from __future__ import annotations
+
+from . import upper
 from modshim import register
 
 # Register overlays
@@ -15,3 +19,5 @@ register(
 register(lower="random", upper="target.upper.random_fixed", merge="random_fixed")
 register(lower="time", upper="target.upper.time_dilation", merge="time_dilation")
 register(lower="urllib", upper="target.upper.urllib_punycode", merge="urllib_punycode")
+
+__all__ = ["upper"]

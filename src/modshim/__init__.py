@@ -42,11 +42,9 @@ class ModshimFinder(MetaPathFinder):
                     # Load the lower (base) module
                     base_module = __import__(lower)
                     
-                    # Load the upper (overlay) module - need to handle the full path
+                    # Load the upper (overlay) module using fromlist to ensure submodules are loaded
                     parts = upper.split('.')
-                    overlay_module = __import__(parts[0])
-                    for part in parts[1:]:
-                        overlay_module = getattr(overlay_module, part)
+                    overlay_module = __import__(upper, fromlist=['__name__'])
                     
                     # Create merged module
                     merged = ModuleType(merge)
