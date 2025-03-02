@@ -73,6 +73,7 @@ class MergedModule(types.ModuleType):
         self._lower_dict: dict[str, Any] = {}
 
     def __getattr__(self, name: str) -> Any:
+        print(f"__getattr__ called on {self.__name__} for {name}")
         # First check upper module
         try:
             return getattr(self._upper, name)
@@ -82,6 +83,7 @@ class MergedModule(types.ModuleType):
         # Then check lower module
         try:
             value = getattr(self._lower, name)
+            print(f"Found {name} in lower module: {value}")
 
             # If this is an import from the lower module, we need to redirect it
             if isinstance(value, type) and value.__module__ == self._lower.__name__:
@@ -150,7 +152,10 @@ class MergedModuleLoader(Loader):
             level: int = 0,
         ) -> types.ModuleType:
             print(
-                f"Custom import called: name={name}, level={level}, package={globals.get('__package__') if globals else None}, fromlist={fromlist}"
+                f"Custom import called: name={name}, level={level}, "
+                f"package={globals.get('__package__') if globals else None}, "
+                f"fromlist={fromlist}, "
+                f"caller_name={globals.get('__name__') if globals else None}"
             )
 
             # For relative imports, we need to handle them in the context of their package
@@ -198,19 +203,23 @@ class MergedModuleLoader(Loader):
                     return importlib.import_module(name)
 
             # For absolute imports, check if we're importing from the target module
+            result = None
             if name == self.lower_name or name.startswith(self.lower_name + "."):
                 # Redirect to merged module
                 merged_name = self.merged_name + name[len(self.lower_name) :]
-                return importlib.import_module(merged_name)
+                result = importlib.import_module(merged_name)
             # Handle imports from within the target package
             elif globals and globals.get('__package__') == self.lower_name:
                 if name.startswith(self.lower_name + '.'):
                     # This is an internal package import, redirect it
                     merged_name = self.merged_name + name[len(self.lower_name):]
-                    return importlib.import_module(merged_name)
+                    result = importlib.import_module(merged_name)
 
-            # Otherwise use normal import
-            return original_import(name, globals, locals, fromlist, level)
+            if result is None:
+                result = original_import(name, globals, locals, fromlist, level)
+            
+            print(f"Import returning module: {result.__name__}")
+            return result
 
         try:
             # Install custom import
