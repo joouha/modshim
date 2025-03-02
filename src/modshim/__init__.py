@@ -273,8 +273,8 @@ class MergedModuleFinder(MetaPathFinder):
 
         # Calculate corresponding paths in upper and lower modules
         relative_path = fullname[len(self.merged_name) :].lstrip(".")
-        upper_fullname = (self.upper_name + relative_path) if relative_path else self.upper_name
-        lower_fullname = (self.lower_name + relative_path) if relative_path else self.lower_name
+        upper_fullname = (self.upper_name + "." + relative_path) if relative_path else self.upper_name
+        lower_fullname = (self.lower_name + "." + relative_path) if relative_path else self.lower_name
 
         # Create loader
         loader = MergedModuleLoader(fullname, upper_fullname, lower_fullname, self.cache)
