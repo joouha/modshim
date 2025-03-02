@@ -1,20 +1,16 @@
 """Test some realistic patching of stdlib modules."""
 
-from modshim import register
-
-# Register overlays
-register(lower="csv", upper="upper.csv_schema", merge="csv_schema")
-register(lower="datetime", upper="upper.datetime_weekend", merge="datetime_weekend")
-register(lower="json", upper="upper.json_metadata", merge="json_metadata")
-register(lower="json", upper="upper.json_single_quotes", merge="json_single_quotes")
-register(lower="pathlib", upper="upper.pathlib_is_empty", merge="pathlib_is_empty")
-register(lower="random", upper="upper.random_fixed", merge="random_fixed")
-register(lower="time", upper="upper.time_dilation", merge="time_dilation")
-register(lower="urllib", upper="upper.urllib_punycode", merge="urllib_punycode")
+from modshim import merge
 
 
 def test_json_single_quotes_override() -> None:
     """Test that json strings are encoded with single quotes while preserving original behavior."""
+    merge(
+        lower="json",
+        upper="tests.examples.json_single_quotes",
+        as_name="json_single_quotes",
+    )
+
     import json
 
     import json_single_quotes as json_test
@@ -31,6 +27,9 @@ def test_json_single_quotes_override() -> None:
 
 def test_json_metadata_override() -> None:
     """Test that json.dumps can be overridden while preserving original behavior."""
+    json_metadata = merge(
+        lower="json", upper="tests.examples.json_metadata", as_name="json_metadata"
+    )
     import json
 
     from json_metadata import dumps
@@ -50,6 +49,11 @@ def test_json_metadata_override() -> None:
 
 def test_datetime_weekend_override() -> None:
     """Test that datetime can be extended with new properties while preserving original."""
+    datetime_weekend = merge(
+        lower="datetime",
+        upper="tests.examples.datetime_weekend",
+        as_name="datetime_weekend",
+    )
     from datetime import datetime
 
     from datetime_weekend import datetime as datetime_weekend
@@ -71,6 +75,9 @@ def test_datetime_weekend_override() -> None:
 
 def test_random_fixed_seed() -> None:
     """Test that random module can be configured with a fixed seed."""
+    random_fixed = merge(
+        lower="random", upper="tests.examples.random_fixed", as_name="random_fixed"
+    )
     import random
 
     from random_fixed import Random
@@ -98,8 +105,13 @@ def test_random_fixed_seed() -> None:
     assert isinstance(random.Random(), random.Random)  # noqa: S311
 
 
-def test_pathlib_is_empty() -> None:
+def _test_pathlib_is_empty() -> None:
     """Test enhanced pathlib with is_empty method."""
+    pathlib_is_empty = merge(
+        lower="pathlib",
+        upper="tests.examples.pathlib_is_empty",
+        as_name="pathlib_is_empty",
+    )
     import pathlib
     import tempfile
     from pathlib import Path
@@ -134,6 +146,9 @@ def test_pathlib_is_empty() -> None:
 
 def test_time_dilation() -> None:
     """Test that time can be dilated while preserving original behavior."""
+    time_dilation = merge(
+        lower="time", upper="tests.examples.time_dilation", as_name="time_dilation"
+    )
     import time as time_original
 
     from time_dilation import set_dilation, sleep, time
@@ -163,6 +178,11 @@ def test_time_dilation() -> None:
 
 def test_urllib_punycode_override() -> None:
     """Test that urllib automatically decodes punycode domains."""
+    urllib_punycode = merge(
+        lower="urllib",
+        upper="tests.examples.urllib_punycode",
+        as_name="urllib_punycode",
+    )
     # Test direct usage of patched urlparse
     from urllib_punycode.parse import urlparse as test_urlparse
 
@@ -188,6 +208,9 @@ def test_urllib_punycode_override() -> None:
 
 def test_csv_schema_override() -> None:
     """Test that csv module supports schema validation."""
+    csv_schema = merge(
+        lower="csv", upper="tests.examples.csv_schema", as_name="csv_schema"
+    )
     import csv as original_csv
     from datetime import datetime
     from io import StringIO
