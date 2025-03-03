@@ -76,15 +76,19 @@ class MergedModule(types.ModuleType):
         print(f"__getattr__ called on {self.__name__} for {name}")
         # First check upper module
         try:
-            return getattr(self._upper, name)
+            val = getattr(self._upper, name)
+            print(f"Found {name} in upper module: {val}")
+            return val
         except AttributeError:
+            print(f"Did not find {name} in upper module")
             pass
 
         # Then check lower module
         try:
             value = getattr(self._lower, name)
             print(f"Found {name} in lower module: {value}")
-
+            if isinstance(value, types.ModuleType):
+                print(f"Module {value.__name__} found in lower")
             # If this is an import from the lower module, we need to redirect it
             if isinstance(value, type) and value.__module__ == self._lower.__name__:
                 # Check if we already have this class in our merged module
@@ -92,7 +96,8 @@ class MergedModule(types.ModuleType):
                     return getattr(self, value.__name__)
 
             return value
-        except AttributeError:
+        except AttributeError as e:
+            print(f"Did not find {name} in lower module: {e}")
             raise
 
 
@@ -160,6 +165,7 @@ class MergedModuleLoader(Loader):
 
             # If importing from the lower module namespace, redirect to merged namespace
             if name == self.lower_name or name.startswith(self.lower_name + "."):
+                print(f"Checking redirect for import {name} -> {self.merged_name}")
                 merged_name = self.merged_name + name[len(self.lower_name):]
                 print(f"Redirecting import from {name} to {merged_name}")
                 try:
