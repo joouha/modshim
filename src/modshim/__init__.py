@@ -214,6 +214,12 @@ class MergedModuleLoader(Loader):
                     # This is an internal package import, redirect it
                     merged_name = self.merged_name + name[len(self.lower_name):]
                     result = importlib.import_module(merged_name)
+            # Handle imports from within the target package
+            elif globals and globals.get('__package__') == self.lower_name:
+                if name.startswith(self.lower_name + '.'):
+                    # This is an internal package import, redirect it
+                    merged_name = self.merged_name + name[len(self.lower_name):]
+                    result = importlib.import_module(merged_name)
 
             if result is None:
                 result = original_import(name, globals, locals, fromlist, level)
