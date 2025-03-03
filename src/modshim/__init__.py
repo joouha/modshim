@@ -8,6 +8,22 @@ from importlib.abc import Loader, MetaPathFinder
 from typing import Any, Mapping
 
 
+class MergedPackage(types.ModuleType):
+    """A package module that redirects submodule access."""
+    
+    def __init__(self, name: str, merged_name: str) -> None:
+        super().__init__(name)
+        self._merged_name = merged_name
+        self._original = sys.modules[name]
+        
+    def __getattr__(self, name: str) -> Any:
+        # If this is a submodule access, redirect to merged version
+        merged_submodule = f"{self._merged_name}.{name}"
+        if merged_submodule in sys.modules:
+            return sys.modules[merged_submodule]
+        return getattr(self._original, name)
+
+
 def create_redirected_class(orig_class: type, merged_module: types.ModuleType) -> type:
     """Creates a new class with redirected base classes and updated method references.
 
@@ -443,6 +459,11 @@ def merge(upper: str, lower: str, as_name: str | None = None) -> types.ModuleTyp
     print(f"Creating merged module: {merged_name}")
     print(f"Upper module: {upper}")
     print(f"Lower module: {lower}")
+
+    # Create package wrapper that redirects submodule access
+    wrapped_package = MergedPackage(lower, merged_name)
+    sys.modules[lower] = wrapped_package
+    
     finder = MergedModuleFinder(
         merged_name, upper, lower, root_lower=lower, root_merged=merged_name
     )
