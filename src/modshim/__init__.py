@@ -202,7 +202,7 @@ class MergedModuleLoader(Loader):
             ):
                 # If it's a relative import from the lower module, redirect to merged module
                 if name.startswith(self.root_lower + "."):
-                    merged_name = self.merged_name + name[len(self.lower_name) :]
+                    merged_name = self.root_merged + name[len(self.root_lower) :]
                     print(f"Redirecting package import from {name} to {merged_name}")
                     try:
                         return importlib.import_module(merged_name)
