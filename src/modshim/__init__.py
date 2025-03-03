@@ -460,6 +460,9 @@ def merge(upper: str, lower: str, as_name: str | None = None) -> types.ModuleTyp
     print(f"Upper module: {upper}")
     print(f"Lower module: {lower}")
 
+    # Import the lower module first
+    importlib.import_module(lower)
+    
     # Create package wrapper that redirects submodule access
     wrapped_package = MergedPackage(lower, merged_name)
     sys.modules[lower] = wrapped_package
