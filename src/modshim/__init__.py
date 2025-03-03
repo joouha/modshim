@@ -163,16 +163,26 @@ class MergedModuleLoader(Loader):
                 f"caller_name={globals.get('__name__') if globals else None}"
             )
 
-            # If importing from the lower module namespace, redirect to merged namespace
-            if name == self.lower_name or name.startswith(self.lower_name + "."):
-                print(f"Checking redirect for import {name} -> {self.merged_name}")
-                merged_name = self.merged_name + name[len(self.lower_name):]
-                print(f"Redirecting import from {name} to {merged_name}")
-                try:
-                    return importlib.import_module(merged_name)
-                except ImportError:
-                    # Fall back to original import if merged module doesn't exist
-                    pass
+            # Check package context of importing module
+            caller_package = globals.get('__package__', '') if globals else ''
+            if (caller_package.startswith(self.merged_name) or 
+                caller_package.startswith(self.lower_name)):
+            
+                # If it's a relative import from the lower module, redirect to merged module
+                if name.startswith(self.lower_name + '.'):
+                    merged_name = self.merged_name + name[len(self.lower_name):]
+                    print(f"Redirecting package import from {name} to {merged_name}")
+                    try:
+                        return importlib.import_module(merged_name)
+                    except ImportError:
+                        pass
+                # Handle imports of the lower module itself
+                elif name == self.lower_name:
+                    print(f"Redirecting module import from {name} to {self.merged_name}")
+                    try:
+                        return importlib.import_module(self.merged_name)
+                    except ImportError:
+                        pass
 
             # For relative imports, we need to handle them in the context of their package
             if level > 0 and globals:
