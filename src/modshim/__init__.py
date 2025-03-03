@@ -75,9 +75,13 @@ class MergedModule(types.ModuleType):
     def __getattr__(self, name: str) -> Any:
         print(f"\nDEBUG ATTRIBUTE ACCESS:")
         print(f"  Module {self.__name__} looking for {name}")
-        print(f"  Current sys.modules containing lower: {[k for k in sys.modules.keys() if self._lower.__name__ in k]}")
-        print(f"  Current sys.modules containing merged: {[k for k in sys.modules.keys() if self.__name__ in k]}")
-        
+        print(
+            f"  Current sys.modules containing lower: {[k for k in sys.modules.keys() if self._lower.__name__ in k]}"
+        )
+        print(
+            f"  Current sys.modules containing merged: {[k for k in sys.modules.keys() if self.__name__ in k]}"
+        )
+
         # First check upper module
         try:
             val = getattr(self._upper, name)
@@ -162,21 +166,30 @@ class MergedModuleLoader(Loader):
         ) -> types.ModuleType:
             print(f"\nDEBUG IMPORT CHAIN:")
             print(f"  Importing: {name}")
-            print(f"  From package: {globals.get('__package__') if globals else 'None'}")
+            print(
+                f"  From package: {globals.get('__package__') if globals else 'None'}"
+            )
             print(f"  From module: {globals.get('__name__') if globals else 'None'}")
             print(f"  With fromlist: {fromlist}")
             print(f"  Level: {level}")
-            print(f"  Current sys.modules keys containing '{self.lower_name}': {[k for k in sys.modules.keys() if self.lower_name in k]}")
-            print(f"  Current sys.modules keys containing '{self.merged_name}': {[k for k in sys.modules.keys() if self.merged_name in k]}")
+            print(
+                f"  Current sys.modules keys containing '{self.lower_name}': {[k for k in sys.modules.keys() if self.lower_name in k]}"
+            )
+            print(
+                f"  Current sys.modules keys containing '{self.merged_name}': {[k for k in sys.modules.keys() if self.merged_name in k]}"
+            )
 
             # Check package context of importing module
-            caller_package = globals.get('__package__', '') if globals else ''
-            if (caller_package.startswith(self.merged_name) or 
-                caller_package.startswith(self.lower_name)):
-            
+            caller_package = globals.get("__package__", "") if globals else ""
+            print(f"  Caller_package: {caller_package}")
+            print(f"  merged_name: {self.merged_name}")
+            print(f"  lower_name: {self.lower_name}")
+            if caller_package.startswith(self.merged_name) or caller_package.startswith(
+                self.lower_name
+            ):
                 # If it's a relative import from the lower module, redirect to merged module
-                if name.startswith(self.lower_name + '.'):
-                    merged_name = self.merged_name + name[len(self.lower_name):]
+                if name.startswith(self.lower_name + "."):
+                    merged_name = self.merged_name + name[len(self.lower_name) :]
                     print(f"Redirecting package import from {name} to {merged_name}")
                     try:
                         return importlib.import_module(merged_name)
@@ -184,7 +197,9 @@ class MergedModuleLoader(Loader):
                         pass
                 # Handle imports of the lower module itself
                 elif name == self.lower_name:
-                    print(f"Redirecting module import from {name} to {self.merged_name}")
+                    print(
+                        f"Redirecting module import from {name} to {self.merged_name}"
+                    )
                     try:
                         return importlib.import_module(self.merged_name)
                     except ImportError:
