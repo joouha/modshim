@@ -97,6 +97,12 @@ class MergedModule(types.ModuleType):
             print(f"  Found {name} in lower module: {value}")
             if isinstance(value, types.ModuleType):
                 print(f"  Module {value.__name__} found in lower")
+                # If this is a submodule of the lower module, redirect to merged version
+                if value.__name__.startswith(self._lower.__name__ + "."):
+                    merged_name = self.__name__ + value.__name__[len(self._lower.__name__):]
+                    if merged_name in sys.modules:
+                        return sys.modules[merged_name]
+                return value
             # If this is an import from the lower module, we need to redirect it
             if isinstance(value, type) and value.__module__ == self._lower.__name__:
                 # Check if we already have this class in our merged module
