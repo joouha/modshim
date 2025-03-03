@@ -158,6 +158,16 @@ class MergedModuleLoader(Loader):
                 f"caller_name={globals.get('__name__') if globals else None}"
             )
 
+            # If importing from the lower module namespace, redirect to merged namespace
+            if name == self.lower_name or name.startswith(self.lower_name + "."):
+                merged_name = self.merged_name + name[len(self.lower_name):]
+                print(f"Redirecting import from {name} to {merged_name}")
+                try:
+                    return importlib.import_module(merged_name)
+                except ImportError:
+                    # Fall back to original import if merged module doesn't exist
+                    pass
+
             # For relative imports, we need to handle them in the context of their package
             if level > 0 and globals:
                 package = globals.get("__package__", "")
