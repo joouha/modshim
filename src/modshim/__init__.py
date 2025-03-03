@@ -80,7 +80,17 @@ class MergedModule(types.ModuleType):
         print(f"  Module dict contents: {vars(self._lower)}")
         print(f"  Looking up name '{name}' in module {self._lower.__name__}")
 
-        # First check upper module
+        # First check if this is a submodule path
+        if self._lower.__name__ + "." + name in sys.modules:
+            print(f"  Found as submodule path: {self._lower.__name__}.{name}")
+            # Return the merged version if it exists
+            merged_name = self.__name__ + "." + name
+            if merged_name in sys.modules:
+                return sys.modules[merged_name]
+            # Otherwise return the original submodule
+            return sys.modules[self._lower.__name__ + "." + name]
+
+        # Then check upper module
         try:
             val = getattr(self._upper, name)
             print(f"  Found {name} in upper module: {val}")
