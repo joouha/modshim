@@ -192,14 +192,16 @@ class MergedModuleLoader(Loader):
             print(f"  root_lower: {self.root_lower}")
             # Get calling module name
             caller_module = globals.get("__name__", "") if globals else ""
-            
+
             # Check if we're in the merged module or anywhere in the lower module hierarchy
-            if (caller_package.startswith(self.root_merged) or 
-                caller_package == self.root_lower or
-                caller_package.startswith(self.root_lower + '.') or
-                caller_module.startswith(self.root_lower + '.')):
+            if (
+                caller_package.startswith(self.root_merged)
+                or caller_package == self.root_lower
+                or caller_package.startswith(self.root_lower + ".")
+                or caller_module.startswith(self.root_lower + ".")
+            ):
                 # If it's a relative import from the lower module, redirect to merged module
-                if name.startswith(self.lower_name + "."):
+                if name.startswith(self.root_lower + "."):
                     merged_name = self.merged_name + name[len(self.lower_name) :]
                     print(f"Redirecting package import from {name} to {merged_name}")
                     try:
@@ -207,7 +209,7 @@ class MergedModuleLoader(Loader):
                     except ImportError:
                         pass
                 # Handle imports of the lower module itself
-                elif name == self.lower_name:
+                elif name == self.root_lower:
                     print(
                         f"Redirecting module import from {name} to {self.merged_name}"
                     )
