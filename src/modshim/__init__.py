@@ -89,50 +89,31 @@ class MergedModule(types.ModuleType):
         self._lower_dict: dict[str, Any] = {}
 
     def __getattr__(self, name: str) -> Any:
-        print(f"\nDEBUG ATTRIBUTE ACCESS:")
-        print(f"  Module {self.__name__} looking for {name}")
-        print(
-            f"  Current sys.modules containing lower: {[k for k in sys.modules.keys() if self._lower.__name__ in k]}"
-        )
-        print(
-            f"  Current sys.modules containing merged: {[k for k in sys.modules.keys() if self.__name__ in k]}"
-        )
-        print(f"  Module dict keys: {vars(self._lower).keys()}")
-        print(f"  Looking up name '{name}' in module {self._lower.__name__}")
-
-        # First check if this is a submodule path
-        if self._lower.__name__ + "." + name in sys.modules:
-            print(f"  Found as submodule path: {self._lower.__name__}.{name}")
+        # First check if this is a submodule path 
+        full_lower_name = f"{self._lower.__name__}.{name}"
+        if full_lower_name in sys.modules:
             # Return the merged version if it exists
-            merged_name = self.__name__ + "." + name
+            merged_name = f"{self.__name__}.{name}"
             if merged_name in sys.modules:
                 return sys.modules[merged_name]
             # Otherwise return the original submodule
-            return sys.modules[self._lower.__name__ + "." + name]
+            return sys.modules[full_lower_name]
 
         # Then check upper module
         try:
             val = getattr(self._upper, name)
-            print(f"  Found {name} in upper module: {val}")
             return val
         except AttributeError:
-            print(f"  Did not find {name} in upper module")
             pass
 
         # Then check lower module
         try:
             value = getattr(self._lower, name)
-            print(f"  Found {name} in lower module: {value}")
             if isinstance(value, types.ModuleType):
-                print(f"  Module {value.__name__} found in lower")
                 # If this is a submodule of the lower module, redirect to merged version
                 if value.__name__.startswith(self._lower.__name__ + "."):
-                    merged_name = (
-                        self.__name__ + value.__name__[len(self._lower.__name__) :]
-                    )
-                    print(f"  Checking for merged module: {merged_name}")
+                    merged_name = self.__name__ + value.__name__[len(self._lower.__name__):]
                     if merged_name in sys.modules:
-                        print(f"  Found merged module: {merged_name}")
                         return sys.modules[merged_name]
                 return value
             # If this is an import from the lower module, we need to redirect it
@@ -140,14 +121,8 @@ class MergedModule(types.ModuleType):
                 # Check if we already have this class in our merged module
                 if hasattr(self, value.__name__):
                     return getattr(self, value.__name__)
-
             return value
         except AttributeError as e:
-            print(f"  Did not find {name} in lower module: {e}")
-            print(f"  Lower module {self._lower.__name__} has these submodules:")
-            print(
-                f"  {[k for k in sys.modules if k.startswith(self._lower.__name__ + '.')]}"
-            )
             raise
 
 
