@@ -73,22 +73,26 @@ class MergedModule(types.ModuleType):
         self._lower_dict: dict[str, Any] = {}
 
     def __getattr__(self, name: str) -> Any:
-        print(f"__getattr__ called on {self.__name__} for {name}")
+        print(f"\nDEBUG ATTRIBUTE ACCESS:")
+        print(f"  Module {self.__name__} looking for {name}")
+        print(f"  Current sys.modules containing lower: {[k for k in sys.modules.keys() if self._lower.__name__ in k]}")
+        print(f"  Current sys.modules containing merged: {[k for k in sys.modules.keys() if self.__name__ in k]}")
+        
         # First check upper module
         try:
             val = getattr(self._upper, name)
-            print(f"Found {name} in upper module: {val}")
+            print(f"  Found {name} in upper module: {val}")
             return val
         except AttributeError:
-            print(f"Did not find {name} in upper module")
+            print(f"  Did not find {name} in upper module")
             pass
 
         # Then check lower module
         try:
             value = getattr(self._lower, name)
-            print(f"Found {name} in lower module: {value}")
+            print(f"  Found {name} in lower module: {value}")
             if isinstance(value, types.ModuleType):
-                print(f"Module {value.__name__} found in lower")
+                print(f"  Module {value.__name__} found in lower")
             # If this is an import from the lower module, we need to redirect it
             if isinstance(value, type) and value.__module__ == self._lower.__name__:
                 # Check if we already have this class in our merged module
@@ -97,7 +101,7 @@ class MergedModule(types.ModuleType):
 
             return value
         except AttributeError as e:
-            print(f"Did not find {name} in lower module: {e}")
+            print(f"  Did not find {name} in lower module: {e}")
             raise
 
 
@@ -156,12 +160,14 @@ class MergedModuleLoader(Loader):
             fromlist: tuple[str, ...] = (),
             level: int = 0,
         ) -> types.ModuleType:
-            print(
-                f"Custom import called: name={name}, level={level}, "
-                f"package={globals.get('__package__') if globals else None}, "
-                f"fromlist={fromlist}, "
-                f"caller_name={globals.get('__name__') if globals else None}"
-            )
+            print(f"\nDEBUG IMPORT CHAIN:")
+            print(f"  Importing: {name}")
+            print(f"  From package: {globals.get('__package__') if globals else 'None'}")
+            print(f"  From module: {globals.get('__name__') if globals else 'None'}")
+            print(f"  With fromlist: {fromlist}")
+            print(f"  Level: {level}")
+            print(f"  Current sys.modules keys containing '{self.lower_name}': {[k for k in sys.modules.keys() if self.lower_name in k]}")
+            print(f"  Current sys.modules keys containing '{self.merged_name}': {[k for k in sys.modules.keys() if self.merged_name in k]}")
 
             # Check package context of importing module
             caller_package = globals.get('__package__', '') if globals else ''
