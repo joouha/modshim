@@ -118,11 +118,15 @@ class MergedModuleLoader(Loader):
         upper_name: str,
         lower_name: str,
         cache: Mapping[str, types.ModuleType],
+        root_lower: str,
+        root_merged: str,
     ) -> None:
         self.merged_name = merged_name
         self.upper_name = upper_name
         self.lower_name = lower_name
         self.cache = cache
+        self.root_lower = root_lower
+        self.root_merged = root_merged
 
     def create_module(self, spec: importlib.machinery.ModuleSpec) -> types.ModuleType:
         print(f"Creating module for spec: {spec.name}")
@@ -229,7 +233,13 @@ class MergedModuleLoader(Loader):
                     merged_name = self.merged_name + lower_name[len(self.lower_name) :]
 
                     # Create a new finder for this submodule
-                    finder = MergedModuleFinder(merged_name, upper_name, lower_name)
+                    finder = MergedModuleFinder(
+                        merged_name,
+                        upper_name,
+                        lower_name,
+                        root_lower=self.root_lower,
+                        root_merged=self.root_merged
+                    )
                     sys.meta_path.insert(0, finder)
 
                     try:
@@ -334,10 +344,19 @@ class MergedModuleLoader(Loader):
 class MergedModuleFinder(MetaPathFinder):
     """Finder that creates merged modules combining upper and lower modules."""
 
-    def __init__(self, merged_name: str, upper_name: str, lower_name: str) -> None:
+    def __init__(
+        self,
+        merged_name: str,
+        upper_name: str,
+        lower_name: str,
+        root_lower: str | None = None,
+        root_merged: str | None = None,
+    ) -> None:
         self.merged_name = merged_name
         self.upper_name = upper_name
         self.lower_name = lower_name
+        self.root_lower = root_lower or lower_name
+        self.root_merged = root_merged or merged_name
         self.cache: dict[str, types.ModuleType] = {}
 
     def find_spec(
@@ -392,7 +411,13 @@ def merge(upper: str, lower: str, as_name: str | None = None) -> types.ModuleTyp
     print(f"Creating merged module: {merged_name}")
     print(f"Upper module: {upper}")
     print(f"Lower module: {lower}")
-    finder = MergedModuleFinder(merged_name, upper, lower)
+    finder = MergedModuleFinder(
+        merged_name,
+        upper,
+        lower,
+        root_lower=lower,
+        root_merged=merged_name
+    )
     sys.meta_path.insert(0, finder)
     merged = importlib.import_module(merged_name)
     print(f"Merged module contents: {dir(merged)}")
