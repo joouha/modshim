@@ -188,6 +188,8 @@ class MergedModuleLoader(Loader):
             print(f"  Caller_package: {caller_package}")
             print(f"  merged_name: {self.merged_name}")
             print(f"  lower_name: {self.lower_name}")
+            print(f"  root_merged: {self.root_merged}")
+            print(f"  root_lower: {self.root_lower}")
             if caller_package.startswith(self.merged_name) or caller_package.startswith(
                 self.lower_name
             ):
@@ -238,7 +240,7 @@ class MergedModuleLoader(Loader):
                         upper_name,
                         lower_name,
                         root_lower=self.root_lower,
-                        root_merged=self.root_merged
+                        root_merged=self.root_merged,
                     )
                     sys.meta_path.insert(0, finder)
 
@@ -384,12 +386,12 @@ class MergedModuleFinder(MetaPathFinder):
 
         # Create loader
         loader = MergedModuleLoader(
-            fullname, 
-            upper_fullname, 
-            lower_fullname, 
+            fullname,
+            upper_fullname,
+            lower_fullname,
             self.cache,
             root_lower=self.root_lower,
-            root_merged=self.root_merged
+            root_merged=self.root_merged,
         )
 
         # Create a spec for the merged module
@@ -417,11 +419,7 @@ def merge(upper: str, lower: str, as_name: str | None = None) -> types.ModuleTyp
     print(f"Upper module: {upper}")
     print(f"Lower module: {lower}")
     finder = MergedModuleFinder(
-        merged_name,
-        upper,
-        lower,
-        root_lower=lower,
-        root_merged=merged_name
+        merged_name, upper, lower, root_lower=lower, root_merged=merged_name
     )
     sys.meta_path.insert(0, finder)
     merged = importlib.import_module(merged_name)
