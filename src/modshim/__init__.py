@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import builtins
+import logging
 import importlib.util
+
+# Set up logger with NullHandler
+log = logging.getLogger(__name__)
+log.addHandler(logging.NullHandler())
 import sys
 import types
 from importlib.abc import Loader, MetaPathFinder
@@ -25,7 +30,7 @@ class MergedModule(types.ModuleType):
         self._lower_dict: dict[str, Any] = {}
 
     def __getattr__(self, name: str) -> Any:
-        print(f"Getting attribute '{name}' from {self}")
+        log.debug("Getting attribute '%s' from %s", name, self)
         # First check if this is a submodule path
         full_lower_name = f"{self._lower.__name__}.{name}"
         if full_lower_name in sys.modules:
@@ -83,7 +88,7 @@ class MergedModuleLoader(Loader):
         self.cache = cache
 
     def create_module(self, spec: importlib.machinery.ModuleSpec) -> types.ModuleType:
-        print(f"Creating module for spec: {spec!r}")
+        log.debug("Creating module for spec: %r", spec)
         # If already merged, return from cache
         if spec.name in self.cache:
             return self.cache[spec.name]
@@ -108,14 +113,16 @@ class MergedModuleLoader(Loader):
         return merged
 
     def exec_module(self, module: types.ModuleType) -> None:
-        print(f"Executing module: {module.__name__}")
-        print(f"Upper module path: {self.upper_name}")
-        print(f"Lower module path: {self.lower_name}")
-        print(
-            f"Lower module contents before: {[x for x in dir(module._lower) if not x.startswith('__')]}"
+        log.debug("Executing module: %s", module.__name__)
+        log.debug("Upper module path: %s", self.upper_name)
+        log.debug("Lower module path: %s", self.lower_name)
+        log.debug(
+            "Lower module contents before: %s",
+            [x for x in dir(module._lower) if not x.startswith("__")],
         )
-        print(
-            f"Upper module contents: {[x for x in dir(module._upper) if not x.startswith('__')]}"
+        log.debug(
+            "Upper module contents: %s",
+            [x for x in dir(module._upper) if not x.startswith("__")],
         )
 
         # Store original import
@@ -128,7 +135,7 @@ class MergedModuleLoader(Loader):
             fromlist: tuple[str, ...] = (),
             level: int = 0,
         ) -> types.ModuleType:
-            print(f"Importing: {name} ({fromlist=} {level=})")
+            log.debug("Importing: %s (fromlist=%r, level=%r)", name, fromlist, level)
             original_name = name
             # Get calling module name
             caller_package = globals.get("__package__", "") if globals else ""
@@ -206,8 +213,13 @@ class MergedModuleLoader(Loader):
 
             # setattr(caller_module, original_name, result)
 
-            print(
-                f"Import returning module '{result.__name__}' for import of '{original_name}' ({fromlist=} {level=}) by '{caller_module}'"
+            log.debug(
+                "Import returning module '%s' for import of '%s' (fromlist=%r, level=%r) by '%s'",
+                result.__name__,
+                original_name,
+                fromlist,
+                level,
+                caller_module,
             )
             return result
 
@@ -219,10 +231,10 @@ class MergedModuleLoader(Loader):
 
             # Re-import lower module with our import hook active
             # This ensures internal imports go through our hook
-            print(f"Reloading '{module._lower.__spec__.name}'")
+            log.debug("Reloading '%s'", module._lower.__spec__.name)
             # importlib.reload(module._lower)
             module._lower.__spec__.loader.exec_module(module._lower)
-            print(f"Reloaded '{module._lower.__spec__.name}'")
+            log.debug("Reloaded '%s'", module._lower.__spec__.name)
 
             # Copy attributes from lower first
             for name, value in vars(module._lower).items():
@@ -275,8 +287,10 @@ class MergedModuleLoader(Loader):
 
         finally:
             # Restore original import
-            print(
-                f"Exec'd module ('{module.__spec__.name}') contents after: {[x for x in dir(module._lower) if not x.startswith('__')]}"
+            log.debug(
+                "Exec'd module ('%s') contents after: %s",
+                module.__spec__.name,
+                [x for x in dir(module._lower) if not x.startswith("__")],
             )
             builtins.__import__ = original_import
 
@@ -351,9 +365,9 @@ def shim(upper: str, lower: str, as_name: str | None = None) -> types.ModuleType
     """
     merged_name = as_name or f"{lower}_shim"
 
-    print(f"Creating merged module: {merged_name}")
-    print(f"Upper module: {upper}")
-    print(f"Lower module: {lower}")
+    log.debug("Creating merged module: %s", merged_name)
+    log.debug("Upper module: %s", upper)
+    log.debug("Lower module: %s", lower)
 
     finder = MergedModuleFinder(merged_name, upper, lower)
     sys.meta_path.insert(0, finder)
@@ -361,8 +375,9 @@ def shim(upper: str, lower: str, as_name: str | None = None) -> types.ModuleType
     # Import the merged module
     merged_module = importlib.import_module(merged_name)
     sys.modules[merged_name] = merged_module
-    print(
-        f"Merged module contents: {[x for x in dir(merged_module) if not x.startswith('__')]}"
+    log.debug(
+        "Merged module contents: %s",
+        [x for x in dir(merged_module) if not x.startswith("__")],
     )
 
     return merged_module
