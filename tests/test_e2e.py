@@ -1,11 +1,13 @@
 """Test some realistic patching of stdlib modules."""
 
-from modshim import merge
+import pytest
+
+from modshim import shim
 
 
 def test_json_single_quotes_override() -> None:
     """Test that json strings are encoded with single quotes while preserving original behavior."""
-    merge(
+    shim(
         lower="json",
         upper="tests.examples.json_single_quotes",
         as_name="json_single_quotes",
@@ -27,9 +29,7 @@ def test_json_single_quotes_override() -> None:
 
 def test_json_metadata_override() -> None:
     """Test that json.dumps can be overridden while preserving original behavior."""
-    json_metadata = merge(
-        lower="json", upper="tests.examples.json_metadata", as_name="json_metadata"
-    )
+    shim(lower="json", upper="tests.examples.json_metadata", as_name="json_metadata")
     import json
 
     from json_metadata import dumps
@@ -49,7 +49,7 @@ def test_json_metadata_override() -> None:
 
 def test_datetime_weekend_override() -> None:
     """Test that datetime can be extended with new properties while preserving original."""
-    merge(
+    shim(
         lower="datetime",
         upper="tests.examples.datetime_weekend",
         as_name="datetime_weekend",
@@ -75,7 +75,7 @@ def test_datetime_weekend_override() -> None:
 
 def test_random_fixed_seed() -> None:
     """Test that random module can be configured with a fixed seed."""
-    merge(lower="random", upper="tests.examples.random_fixed", as_name="random_fixed")
+    shim(lower="random", upper="tests.examples.random_fixed", as_name="random_fixed")
     import random
 
     from random_fixed import Random
@@ -105,7 +105,7 @@ def test_random_fixed_seed() -> None:
 
 def test_pathlib_is_empty() -> None:
     """Test enhanced pathlib with is_empty method."""
-    merge(
+    shim(
         lower="pathlib",
         upper="tests.examples.pathlib_is_empty",
         as_name="pathlib_is_empty",
@@ -144,7 +144,7 @@ def test_pathlib_is_empty() -> None:
 
 def test_time_dilation() -> None:
     """Test that time can be dilated while preserving original behavior."""
-    merge(lower="time", upper="tests.examples.time_dilation", as_name="time_dilation")
+    shim(lower="time", upper="tests.examples.time_dilation", as_name="time_dilation")
     import time as time_original
 
     from time_dilation import set_dilation, sleep, time
@@ -174,7 +174,7 @@ def test_time_dilation() -> None:
 
 def test_urllib_punycode_override() -> None:
     """Test that urllib automatically decodes punycode domains."""
-    merge(
+    shim(
         lower="urllib",
         upper="tests.examples.urllib_punycode",
         as_name="urllib_punycode",
@@ -204,7 +204,7 @@ def test_urllib_punycode_override() -> None:
 
 def test_csv_schema_override() -> None:
     """Test that csv module supports schema validation."""
-    merge(lower="csv", upper="tests.examples.csv_schema", as_name="csv_schema")
+    shim(lower="csv", upper="tests.examples.csv_schema", as_name="csv_schema")
     import csv as original_csv
     from datetime import datetime
     from io import StringIO
@@ -247,12 +247,10 @@ id,name,date,score
 
     # Verify original csv remains unaffected
     csv_data.seek(0)
-    original_reader = original_csv.DictReader(csv_data)
-    
     # Verify original DictReader rejects schema parameter
     with pytest.raises(TypeError):
         original_csv.DictReader(csv_data, schema=schema)
-    
+    original_reader = original_csv.DictReader(csv_data)
     original_row = next(original_reader)
     assert isinstance(original_row["id"], str)  # Still strings
     assert isinstance(original_row["score"], str)

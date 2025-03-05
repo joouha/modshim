@@ -1,6 +1,7 @@
 """Enhanced csv with schema validation and type conversion."""
 
 from __future__ import annotations
+
 import csv as original_csv
 from datetime import datetime
 from typing import Any, Callable
@@ -33,7 +34,7 @@ class Schema:
                     result[field] = converter(row[field])
             except ValueError as e:
                 raise ValueError(
-                    f"Invalid value for {field}: {row[field]}\n{str(e)}"
+                    f"Invalid value for {field}: {row[field]}\n{e!s}"
                 ) from None
         return result
 

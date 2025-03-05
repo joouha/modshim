@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path as OriginalPath
+from pathlib._local import Path as OriginalPath
 
 
 class Path(OriginalPath):

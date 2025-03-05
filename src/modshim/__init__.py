@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import builtins
-import logging
 import importlib.util
-
-# Set up logger with NullHandler
-log = logging.getLogger(__name__)
-log.addHandler(logging.NullHandler())
+import logging
 import sys
 import types
 from importlib.abc import Loader, MetaPathFinder
@@ -16,6 +12,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+# Set up logger with NullHandler
+log = logging.getLogger(__name__)
+log.addHandler(logging.NullHandler())
 
 
 class MergedModule(types.ModuleType):
@@ -66,7 +66,7 @@ class MergedModule(types.ModuleType):
                 if hasattr(self, value.__name__):
                     return getattr(self, value.__name__)
             return value
-        except AttributeError as e:
+        except AttributeError:
             raise
 
 
