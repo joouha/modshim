@@ -1,80 +1,16 @@
 """Module for creating merged virtual Python modules that overlay objects from an upper module onto a lower module."""
 
+from __future__ import annotations
+
 import builtins
 import importlib.util
 import sys
 import types
 from importlib.abc import Loader, MetaPathFinder
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any
 
-
-class MergedPackage(types.ModuleType):
-    """A package module that redirects submodule access."""
-
-    def __init__(self, name: str, merged_name: str) -> None:
-        super().__init__(name)
-        self._merged_name = merged_name
-        self._original = sys.modules[name]
-
-    def __getattr__(self, name: str) -> Any:
-        # If this is a submodule access, redirect to merged version
-        merged_submodule = f"{self._merged_name}.{name}"
-        if merged_submodule in sys.modules:
-            return sys.modules[merged_submodule]
-        return getattr(self._original, name)
-
-
-def create_redirected_class(orig_class: type, merged_module: types.ModuleType) -> type:
-    """Creates a new class with redirected base classes and updated method references.
-
-    Args:
-        orig_class: The original class to redirect
-        merged_module: The merged module containing redirected references
-
-    Returns:
-        A new class with updated bases and method references
-    """
-    # Create new class with updated bases
-    bases = []
-    for base in orig_class.__bases__:
-        if base.__module__ == merged_module._lower.__name__:
-            redirected_base = getattr(merged_module, base.__name__)
-            bases.append(redirected_base)
-        else:
-            bases.append(base)
-
-    # Create new class with updated namespace
-    namespace = dict(orig_class.__dict__)
-
-    # Update any class-level references to lower module
-    for key, value in namespace.items():
-        if isinstance(value, types.FunctionType):
-            # Update method globals like we do for functions
-            new_globals = dict(value.__globals__)
-            new_globals["__name__"] = merged_module.__name__
-            new_globals["__package__"] = merged_module.__package__
-
-            # Redirect module references
-            for k, v in new_globals.items():
-                if isinstance(v, types.ModuleType):
-                    if v.__name__ == merged_module._lower.__name__:
-                        new_globals[k] = merged_module
-                    elif v.__name__.startswith(merged_module._lower.__name__ + "."):
-                        merged_name = (
-                            merged_module.__name__
-                            + v.__name__[len(merged_module._lower.__name__) :]
-                        )
-                        new_globals[k] = sys.modules.get(merged_name)
-
-            namespace[key] = types.FunctionType(
-                value.__code__,
-                new_globals,
-                value.__name__,
-                value.__defaults__,
-                value.__closure__,
-            )
-
-    return type(orig_class.__name__, tuple(bases), namespace)
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class MergedModule(types.ModuleType):
@@ -89,7 +25,8 @@ class MergedModule(types.ModuleType):
         self._lower_dict: dict[str, Any] = {}
 
     def __getattr__(self, name: str) -> Any:
-        # First check if this is a submodule path 
+        print(f"Getting attribute '{name}' from {self}")
+        # First check if this is a submodule path
         full_lower_name = f"{self._lower.__name__}.{name}"
         if full_lower_name in sys.modules:
             # Return the merged version if it exists
@@ -112,7 +49,9 @@ class MergedModule(types.ModuleType):
             if isinstance(value, types.ModuleType):
                 # If this is a submodule of the lower module, redirect to merged version
                 if value.__name__.startswith(self._lower.__name__ + "."):
-                    merged_name = self.__name__ + value.__name__[len(self._lower.__name__):]
+                    merged_name = (
+                        self.__name__ + value.__name__[len(self._lower.__name__) :]
+                    )
                     if merged_name in sys.modules:
                         return sys.modules[merged_name]
                 return value
@@ -134,19 +73,17 @@ class MergedModuleLoader(Loader):
         merged_name: str,
         upper_name: str,
         lower_name: str,
+        finder: MetaPathFinder,
         cache: Mapping[str, types.ModuleType],
-        root_lower: str,
-        root_merged: str,
     ) -> None:
         self.merged_name = merged_name
         self.upper_name = upper_name
         self.lower_name = lower_name
+        self.finder = finder
         self.cache = cache
-        self.root_lower = root_lower
-        self.root_merged = root_merged
 
     def create_module(self, spec: importlib.machinery.ModuleSpec) -> types.ModuleType:
-        print(f"Creating module for spec: {spec.name}")
+        print(f"Creating module for spec: {spec!r}")
         # If already merged, return from cache
         if spec.name in self.cache:
             return self.cache[spec.name]
@@ -157,7 +94,9 @@ class MergedModuleLoader(Loader):
         except ImportError:
             upper_module = types.ModuleType(self.upper_name)
 
-        lower_module = importlib.import_module(self.lower_name)
+        # Create a copy of the lower module
+        lower_spec = importlib.util.find_spec(self.lower_name)
+        lower_module = importlib.util.module_from_spec(lower_spec)
 
         # Create merged module
         merged = MergedModule(spec.name, upper_module, lower_module)
@@ -172,8 +111,12 @@ class MergedModuleLoader(Loader):
         print(f"Executing module: {module.__name__}")
         print(f"Upper module path: {self.upper_name}")
         print(f"Lower module path: {self.lower_name}")
-        print(f"Lower module contents before: {dir(module._lower)}")
-        print(f"Upper module contents: {dir(module._upper)}")
+        print(
+            f"Lower module contents before: {[x for x in dir(module._lower) if not x.startswith('__')]}"
+        )
+        print(
+            f"Upper module contents: {[x for x in dir(module._upper) if not x.startswith('__')]}"
+        )
 
         # Store original import
         original_import = builtins.__import__
@@ -185,55 +128,22 @@ class MergedModuleLoader(Loader):
             fromlist: tuple[str, ...] = (),
             level: int = 0,
         ) -> types.ModuleType:
-            print(f"\nDEBUG IMPORT CHAIN:")
-            print(f"  Importing: {name}")
-            print(
-                f"  From package: {globals.get('__package__') if globals else 'None'}"
-            )
-            print(f"  From module: {globals.get('__name__') if globals else 'None'}")
-            print(f"  With fromlist: {fromlist}")
-            print(f"  Level: {level}")
-            print(
-                f"  Current sys.modules keys containing '{self.lower_name}': {[k for k in sys.modules.keys() if self.lower_name in k]}"
-            )
-            print(
-                f"  Current sys.modules keys containing '{self.merged_name}': {[k for k in sys.modules.keys() if self.merged_name in k]}"
-            )
-
-            # Check package context of importing module
-            caller_package = globals.get("__package__", "") if globals else ""
-            print(f"  Caller_package: {caller_package}")
-            print(f"  merged_name: {self.merged_name}")
-            print(f"  lower_name: {self.lower_name}")
-            print(f"  root_merged: {self.root_merged}")
-            print(f"  root_lower: {self.root_lower}")
+            print(f"Importing: {name} ({fromlist=} {level=})")
+            original_name = name
             # Get calling module name
+            caller_package = globals.get("__package__", "") if globals else ""
             caller_module = globals.get("__name__", "") if globals else ""
 
-            # Check if we're in the merged module or anywhere in the lower module hierarchy
-            if (
-                caller_package.startswith(self.root_merged)
-                or caller_package == self.root_lower
-                or caller_package.startswith(self.root_lower + ".")
-                or caller_module.startswith(self.root_lower + ".")
+            # Check if we're anywhere in the lower module hierarchy
+            if (caller_package == self.finder.lower_name) or caller_module.startswith(
+                self.finder.lower_name + "."
             ):
-                # If it's a relative import from the lower module, redirect to merged module
-                if name.startswith(self.root_lower + "."):
-                    merged_name = self.root_merged + name[len(self.root_lower) :]
-                    print(f"Redirecting package import from {name} to {merged_name}")
-                    try:
-                        return importlib.import_module(merged_name)
-                    except ImportError:
-                        pass
-                # Handle imports of the lower module itself
-                elif name == self.root_lower:
-                    print(
-                        f"Redirecting module import from {name} to {self.merged_name}"
+                if (name == self.finder.lower_name) or name.startswith(
+                    self.finder.lower_name + "."
+                ):
+                    name = name.replace(
+                        self.finder.lower_name, self.finder.merged_name, 1
                     )
-                    try:
-                        return importlib.import_module(self.merged_name)
-                    except ImportError:
-                        pass
 
             # For relative imports, we need to handle them in the context of their package
             if level > 0 and globals:
@@ -252,27 +162,20 @@ class MergedModuleLoader(Loader):
                     else:
                         lower_name = package + ("." + name if name else "")
 
-                    # Calculate corresponding upper module name
-                    upper_name = self.upper_name + lower_name[len(self.lower_name) :]
-
                     # Create merged version of the submodule
                     merged_name = self.merged_name + lower_name[len(self.lower_name) :]
 
-                    # Create a new finder for this submodule
-                    finder = MergedModuleFinder(
-                        merged_name,
-                        upper_name,
-                        lower_name,
-                        root_lower=self.root_lower,
-                        root_merged=self.root_merged,
-                    )
-                    sys.meta_path.insert(0, finder)
+                    # Import the merged module
+                    result = importlib.import_module(merged_name)
 
-                    try:
-                        return importlib.import_module(merged_name)
-                    finally:
-                        sys.meta_path.remove(finder)
+                    # For relative imports, add the module to the caller's namespace
+                    # using the local part of the name
+                    if name:  # Only if there's a module name (not just dots)
+                        local_name = name.split(".")[-1]
+                        if globals is not None:
+                            globals[local_name] = result
 
+                    return result
                 # Handle existing merged module relative imports
                 elif package.startswith(self.merged_name):
                     if level > 1:
@@ -301,8 +204,14 @@ class MergedModuleLoader(Loader):
             if result is None:
                 result = original_import(name, globals, locals, fromlist, level)
 
-            print(f"Import returning module: {result.__name__}")
+            # setattr(caller_module, original_name, result)
+
+            print(
+                f"Import returning module '{result.__name__}' for import of '{original_name}' ({fromlist=} {level=}) by '{caller_module}'"
+            )
             return result
+
+        #######
 
         try:
             # Install custom import
@@ -310,23 +219,26 @@ class MergedModuleLoader(Loader):
 
             # Re-import lower module with our import hook active
             # This ensures internal imports go through our hook
-            importlib.reload(module._lower)
+            print(f"Reloading '{module._lower.__spec__.name}'")
+            # importlib.reload(module._lower)
+            module._lower.__spec__.loader.exec_module(module._lower)
+            print(f"Reloaded '{module._lower.__spec__.name}'")
 
             # Copy attributes from lower first
             for name, value in vars(module._lower).items():
                 if not name.startswith("_"):
-                    if (
-                        isinstance(value, type)
-                        and not isinstance(value, type(object))  # Skip built-in types
-                        and not hasattr(value, "__slots__")
-                    ):  # Skip types with slots
-                        # Create redirected class with updated references
-                        try:
-                            value = create_redirected_class(value, module)
-                        except TypeError:
-                            # If we can't create redirected class, use original value
-                            pass
-                    elif isinstance(value, types.FunctionType):
+                    # if (
+                    #     isinstance(value, type)
+                    #     and not isinstance(value, type(object))  # Skip built-in types
+                    #     and not hasattr(value, "__slots__")
+                    # ):  # Skip types with slots
+                    #     # Create redirected class with updated references
+                    #     try:
+                    #         value = create_redirected_class(value, module)
+                    #     except TypeError:
+                    #         # If we can't create redirected class, use original value
+                    #         pass
+                    if isinstance(value, types.FunctionType):
                         # Create new function with merged module's globals
                         new_globals = dict(value.__globals__)
                         new_globals["__name__"] = module.__name__
@@ -363,7 +275,9 @@ class MergedModuleLoader(Loader):
 
         finally:
             # Restore original import
-            print(f"Lower module contents after: {dir(module._lower)}")
+            print(
+                f"Exec'd module ('{module.__spec__.name}') contents after: {[x for x in dir(module._lower) if not x.startswith('__')]}"
+            )
             builtins.__import__ = original_import
 
 
@@ -375,14 +289,10 @@ class MergedModuleFinder(MetaPathFinder):
         merged_name: str,
         upper_name: str,
         lower_name: str,
-        root_lower: str | None = None,
-        root_merged: str | None = None,
     ) -> None:
         self.merged_name = merged_name
         self.upper_name = upper_name
         self.lower_name = lower_name
-        self.root_lower = root_lower or lower_name
-        self.root_merged = root_merged or merged_name
         self.cache: dict[str, types.ModuleType] = {}
 
     def find_spec(
@@ -392,7 +302,9 @@ class MergedModuleFinder(MetaPathFinder):
         target: types.ModuleType | None = None,
     ) -> importlib.machinery.ModuleSpec | None:
         # Only handle imports under our merged namespace
-        if not fullname.startswith(self.merged_name):
+        if fullname != self.merged_name and not fullname.startswith(
+            f"{self.merged_name}."
+        ):
             return None
 
         # Calculate corresponding paths in upper and lower modules
@@ -413,9 +325,8 @@ class MergedModuleFinder(MetaPathFinder):
             fullname,
             upper_fullname,
             lower_fullname,
-            self.cache,
-            root_lower=self.root_lower,
-            root_merged=self.root_merged,
+            finder=self,
+            cache=self.cache,
         )
 
         # Create a spec for the merged module
@@ -427,33 +338,31 @@ class MergedModuleFinder(MetaPathFinder):
         )
 
 
-def merge(upper: str, lower: str, as_name: str | None = None) -> types.ModuleType:
+def shim(upper: str, lower: str, as_name: str | None = None) -> types.ModuleType:
     """Create a merged module combining upper and lower modules.
 
     Args:
         upper: Name of the module containing overrides
         lower: Name of the target module to enhance
-        as_name: Optional name for the merged module (defaults to merged_{lower})
+        as_name: Optional name for the merged module (defaults to '{lower}_shim')
 
     Returns:
         A new module that combines both modules, with upper taking precedence
     """
-    merged_name = as_name or f"merged_{lower}"
+    merged_name = as_name or f"{lower}_shim"
+
     print(f"Creating merged module: {merged_name}")
     print(f"Upper module: {upper}")
     print(f"Lower module: {lower}")
 
-    # Import the lower module first
-    importlib.import_module(lower)
-
-    # Create package wrapper that redirects submodule access
-    wrapped_package = MergedPackage(lower, merged_name)
-    sys.modules[lower] = wrapped_package
-
-    finder = MergedModuleFinder(
-        merged_name, upper, lower, root_lower=lower, root_merged=merged_name
-    )
+    finder = MergedModuleFinder(merged_name, upper, lower)
     sys.meta_path.insert(0, finder)
-    merged = importlib.import_module(merged_name)
-    print(f"Merged module contents: {dir(merged)}")
-    return merged
+
+    # Import the merged module
+    merged_module = importlib.import_module(merged_name)
+    sys.modules[merged_name] = merged_module
+    print(
+        f"Merged module contents: {[x for x in dir(merged_module) if not x.startswith('__')]}"
+    )
+
+    return merged_module
