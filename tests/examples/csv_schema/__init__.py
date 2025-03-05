@@ -11,6 +11,11 @@ class Schema:
     """CSV column schema definition."""
 
     def __init__(self, **fields: type | Callable[[str], Any]) -> None:
+        """Initialize schema with field definitions.
+
+        Args:
+            **fields: Mapping of field names to their type converters
+        """
         self.fields = fields
 
     def validate_and_convert(self, row: dict[str, str]) -> dict[str, Any]:
@@ -43,6 +48,13 @@ class DictReader(original_csv.DictReader):
     """Enhanced DictReader with schema validation."""
 
     def __init__(self, *args: Any, schema: Schema | None = None, **kwargs: Any) -> None:
+        """Initialize DictReader with optional schema validation.
+
+        Args:
+            *args: Positional arguments passed to csv.DictReader
+            schema: Optional Schema instance for validation and conversion
+            **kwargs: Keyword arguments passed to csv.DictReader
+        """
         super().__init__(*args, **kwargs)
         self.schema = schema
 
