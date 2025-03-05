@@ -24,12 +24,27 @@ class MergedModule(types.ModuleType):
     def __init__(
         self, name: str, upper_module: types.ModuleType, lower_module: types.ModuleType
     ) -> None:
+        """Initialize merged module with upper and lower modules.
+
+        Args:
+            name: Name of the merged module
+            upper_module: Module containing overrides
+            lower_module: Base module to enhance
+        """
         super().__init__(name)
         self._upper = upper_module
         self._lower = lower_module
         self._lower_dict: dict[str, Any] = {}
 
     def __getattr__(self, name: str) -> Any:
+        """Get an attribute from either upper or lower module.
+
+        Args:
+            name: Name of attribute to get
+
+        Returns:
+            The attribute value from upper module if it exists, otherwise from lower
+        """
         log.debug("Getting attribute '%s' from %s", name, self)
         # First check if this is a submodule path
         full_lower_name = f"{self._lower.__name__}.{name}"
@@ -61,9 +76,11 @@ class MergedModule(types.ModuleType):
                         return sys.modules[merged_name]
                 return value
             # If this is an import from the lower module, we need to redirect it
-            if isinstance(value, type) and value.__module__ == self._lower.__name__:
-                # Check if we already have this class in our merged module
-                if hasattr(self, value.__name__):
+            if (
+                isinstance(value, type)
+                and value.__module__ == self._lower.__name__
+                and hasattr(self, value.__name__)
+            ):
                     return getattr(self, value.__name__)
             return value
         except AttributeError:
@@ -81,6 +98,15 @@ class MergedModuleLoader(Loader):
         finder: MetaPathFinder,
         cache: Mapping[str, types.ModuleType],
     ) -> None:
+        """Initialize the loader with module names and cache.
+
+        Args:
+            merged_name: Name of the merged module
+            upper_name: Name of the upper module with overrides
+            lower_name: Name of the lower base module
+            finder: The finder that created this loader
+            cache: Cache of already merged modules
+        """
         self.merged_name = merged_name
         self.upper_name = upper_name
         self.lower_name = lower_name
@@ -88,6 +114,14 @@ class MergedModuleLoader(Loader):
         self.cache = cache
 
     def create_module(self, spec: importlib.machinery.ModuleSpec) -> types.ModuleType:
+        """Create a new merged module instance.
+
+        Args:
+            spec: Module spec from the import system
+
+        Returns:
+            A new merged module combining upper and lower modules
+        """
         log.debug("Creating module for spec: %r", spec)
         # If already merged, return from cache
         if spec.name in self.cache:
@@ -113,6 +147,11 @@ class MergedModuleLoader(Loader):
         return merged
 
     def exec_module(self, module: types.ModuleType) -> None:
+        """Execute a merged module by combining upper and lower modules.
+
+        Args:
+            module: The merged module to execute
+        """
         log.debug("Executing module: %s", module.__name__)
         log.debug("Upper module path: %s", self.upper_name)
         log.debug("Lower module path: %s", self.lower_name)
@@ -142,12 +181,12 @@ class MergedModuleLoader(Loader):
             caller_module = globals.get("__name__", "") if globals else ""
 
             # Check if we're anywhere in the lower module hierarchy
-            if (caller_package == self.finder.lower_name) or caller_module.startswith(
-                self.finder.lower_name + "."
+            if (
+                (caller_package == self.finder.lower_name 
+                 or caller_module.startswith(self.finder.lower_name + "."))
+                and (name == self.finder.lower_name 
+                     or name.startswith(self.finder.lower_name + "."))
             ):
-                if (name == self.finder.lower_name) or name.startswith(
-                    self.finder.lower_name + "."
-                ):
                     name = name.replace(
                         self.finder.lower_name, self.finder.merged_name, 1
                     )
@@ -304,6 +343,13 @@ class MergedModuleFinder(MetaPathFinder):
         upper_name: str,
         lower_name: str,
     ) -> None:
+        """Initialize finder with module names.
+
+        Args:
+            merged_name: Name of the merged module
+            upper_name: Name of the upper module with overrides
+            lower_name: Name of the lower base module
+        """
         self.merged_name = merged_name
         self.upper_name = upper_name
         self.lower_name = lower_name
@@ -315,6 +361,16 @@ class MergedModuleFinder(MetaPathFinder):
         path: list[str] | None = None,
         target: types.ModuleType | None = None,
     ) -> importlib.machinery.ModuleSpec | None:
+        """Find and create a module spec for merged modules.
+
+        Args:
+            fullname: Full name of the module to find
+            path: Search path for the module
+            target: Module to use for the spec
+
+        Returns:
+            A module spec for the merged module if applicable, None otherwise
+        """
         # Only handle imports under our merged namespace
         if fullname != self.merged_name and not fullname.startswith(
             f"{self.merged_name}."
