@@ -118,7 +118,20 @@ class MergedModuleLoader(Loader):
         [str, dict[str, Any] | None, dict[str, Any] | None, tuple[str, ...], int],
         ModuleType,
     ]:
-        # AI! Add a method docstring
+        """Temporarily install a custom import hook for handling merged modules.
+
+        This context manager replaces the built-in __import__ function with a custom one
+        that redirects imports within the lower module to the corresponding merged module.
+        This ensures that internal imports in the lower module are properly handled.
+
+        Yields:
+            The custom import function that was temporarily installed.
+
+        Example:
+            with hook_imports():
+                # Imports within this block will use the custom import hook
+                module.load()
+        """
         # Store original import
         original_import = builtins.__import__
 
