@@ -248,7 +248,7 @@ id,name,date,score
     # Verify original csv remains unaffected
     csv_data.seek(0)
     original_reader = original_csv.DictReader(csv_data)
-    # AI! confirm that original_csv.DictReader does not accept the `schema` parameter
+    # AI! add an assertion test confirming that original_csv.DictReader does not accept the `schema` parameter - you should expect a TypeError
     original_row = next(original_reader)
     assert isinstance(original_row["id"], str)  # Still strings
     assert isinstance(original_row["score"], str)
