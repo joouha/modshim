@@ -49,7 +49,7 @@ def test_json_metadata_override() -> None:
 
 def test_datetime_weekend_override() -> None:
     """Test that datetime can be extended with new properties while preserving original."""
-    datetime_weekend = merge(
+    merge(
         lower="datetime",
         upper="tests.examples.datetime_weekend",
         as_name="datetime_weekend",
@@ -75,9 +75,7 @@ def test_datetime_weekend_override() -> None:
 
 def test_random_fixed_seed() -> None:
     """Test that random module can be configured with a fixed seed."""
-    random_fixed = merge(
-        lower="random", upper="tests.examples.random_fixed", as_name="random_fixed"
-    )
+    merge(lower="random", upper="tests.examples.random_fixed", as_name="random_fixed")
     import random
 
     from random_fixed import Random
@@ -105,9 +103,9 @@ def test_random_fixed_seed() -> None:
     assert isinstance(random.Random(), random.Random)  # noqa: S311
 
 
-def _test_pathlib_is_empty() -> None:
+def test_pathlib_is_empty() -> None:
     """Test enhanced pathlib with is_empty method."""
-    pathlib_is_empty = merge(
+    merge(
         lower="pathlib",
         upper="tests.examples.pathlib_is_empty",
         as_name="pathlib_is_empty",
@@ -146,9 +144,7 @@ def _test_pathlib_is_empty() -> None:
 
 def test_time_dilation() -> None:
     """Test that time can be dilated while preserving original behavior."""
-    time_dilation = merge(
-        lower="time", upper="tests.examples.time_dilation", as_name="time_dilation"
-    )
+    merge(lower="time", upper="tests.examples.time_dilation", as_name="time_dilation")
     import time as time_original
 
     from time_dilation import set_dilation, sleep, time
@@ -178,7 +174,7 @@ def test_time_dilation() -> None:
 
 def test_urllib_punycode_override() -> None:
     """Test that urllib automatically decodes punycode domains."""
-    urllib_punycode = merge(
+    merge(
         lower="urllib",
         upper="tests.examples.urllib_punycode",
         as_name="urllib_punycode",
@@ -208,9 +204,7 @@ def test_urllib_punycode_override() -> None:
 
 def test_csv_schema_override() -> None:
     """Test that csv module supports schema validation."""
-    csv_schema = merge(
-        lower="csv", upper="tests.examples.csv_schema", as_name="csv_schema"
-    )
+    merge(lower="csv", upper="tests.examples.csv_schema", as_name="csv_schema")
     import csv as original_csv
     from datetime import datetime
     from io import StringIO
@@ -254,6 +248,7 @@ id,name,date,score
     # Verify original csv remains unaffected
     csv_data.seek(0)
     original_reader = original_csv.DictReader(csv_data)
+    # AI! confirm that original_csv.DictReader does not accept the `schema` parameter
     original_row = next(original_reader)
     assert isinstance(original_row["id"], str)  # Still strings
     assert isinstance(original_row["score"], str)
