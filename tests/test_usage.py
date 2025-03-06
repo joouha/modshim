@@ -134,6 +134,7 @@ def test_module_reload():
     """Test behavior when reloading shimmed modules."""
     import importlib
     import sys
+    from importlib.machinery import ModuleSpec
     from types import ModuleType
 
     # Create in-memory modules with counters
@@ -147,6 +148,8 @@ def test_module_reload():
         lower_counter += 1
         return lower_counter
     lower.get_count = get_lower_count
+    # Create a spec for the lower module
+    lower.__spec__ = ModuleSpec("test_lower", None)
     sys.modules["test_lower"] = lower
 
     # Create overlay module 
@@ -156,6 +159,8 @@ def test_module_reload():
         upper_counter += 1
         return upper_counter
     upper.get_count = get_upper_count
+    # Create a spec for the upper module
+    upper.__spec__ = ModuleSpec("test_upper", None)
     sys.modules["test_upper"] = upper
     
     # Create merged module
