@@ -226,17 +226,13 @@ class MergedModuleLoader(Loader):
                         original_import, name, globals, locals, fromlist, level
                     )
 
-            current_import = builtins.__import__
-            if current_import != custom_import:
-                builtins.__import__ = custom_import
+            # Set import hook atomically within the lock
+            builtins.__import__ = custom_import
 
             try:
                 yield custom_import
             finally:
-                if (
-                    builtins.__import__ == custom_import
-                    and self._original_import is not None
-                ):
+                if self._original_import is not None:
                     builtins.__import__ = self._original_import
                     self._original_import = None
 
@@ -300,11 +296,17 @@ class MergedModuleFinder(MetaPathFinder):
                     or name.startswith(f"{self.merged_name}.")
                 ]
                 for name in modules_to_remove:
-                    del sys.modules[name]
+                    try:
+                        del sys.modules[name]
+                    except KeyError:
+                        # Module already removed
+                        pass
 
-        except Exception:  # noqa: S110
-            # Ignore cleanup errors during interpreter shutdown
-            pass
+        except (ImportError, AttributeError) as e:
+            # Only catch specific errors that might occur during shutdown
+            import sys
+            if not sys.is_finalizing():
+                raise
 
     def __init__(
         self,
