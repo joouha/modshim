@@ -111,6 +111,9 @@ class MergedModuleLoader(Loader):
 
         # Create a copy of the lower module
         lower_spec = find_spec(self.lower_name)
+        if lower_spec is None:
+            raise ImportError(f"No module named '{self.lower_name}'")
+        
         lower_module = module_from_spec(lower_spec)
 
         # Create merged module
