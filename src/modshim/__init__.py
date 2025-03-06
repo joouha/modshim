@@ -11,7 +11,7 @@ from importlib import import_module
 from importlib.abc import Loader, MetaPathFinder
 from importlib.util import find_spec, module_from_spec, spec_from_loader
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Callable, ClassVar
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from importlib.machinery import ModuleSpec
@@ -70,9 +70,6 @@ class MergedModuleLoader(Loader):
         lower_name: str,
         finder: MetaPathFinder,
     ) -> None:
-        super().__init__()
-        self._import_lock = threading.Lock()
-        self._original_import = None
         """Initialize the loader with module names and cache.
 
         Args:
@@ -81,10 +78,14 @@ class MergedModuleLoader(Loader):
             lower_name: Name of the lower base module
             finder: The finder that created this loader
         """
+        super().__init__()
         self.merged_name = merged_name
         self.upper_name = upper_name
         self.lower_name = lower_name
         self.finder = finder
+
+        self._import_lock = threading.Lock()
+        self._original_import = None
 
     def create_module(self, spec: ModuleSpec) -> ModuleType:
         """Create a new merged module instance.
@@ -150,68 +151,72 @@ class MergedModuleLoader(Loader):
                 self._original_import = builtins.__import__
 
             def custom_import(
-            name: str,
-            globals: dict[str, Any] | None = None,
-            locals: dict[str, Any] | None = None,
-            fromlist: tuple[str, ...] = (),
-            level: int = 0,
-        ) -> ModuleType:
-            log.debug("Importing: %s (fromlist=%r, level=%r)", name, fromlist, level)
-            original_name = name
-            original_level = level
-            # Get calling module name
-            caller_package = globals.get("__package__", "") if globals else ""
-            caller_module = globals.get("__name__", "") if globals else ""
-
-            # Resolve relative imports from the lower module
-            if level and (
-                caller_package == self.lower_name
-                or caller_package.startswith(self.lower_name + ".")
-            ):
-                # Calculate the absolute names
-                name = (
-                    ".".join(
-                        caller_package.split(".")[: -level + 1]
-                        + ([name] if name else [])
-                    )
-                    if level > 1
-                    else caller_package + ("." + name if name else "")
+                name: str,
+                globals: dict[str, Any] | None = None,
+                locals: dict[str, Any] | None = None,
+                fromlist: tuple[str, ...] = (),
+                level: int = 0,
+            ) -> ModuleType:
+                log.debug(
+                    "Importing: %s (fromlist=%r, level=%r)", name, fromlist, level
                 )
-                # Reset the level, as name is now resolved
-                level = 0
+                original_name = name
+                original_level = level
+                # Get calling module name
+                caller_package = globals.get("__package__", "") if globals else ""
+                caller_module = globals.get("__name__", "") if globals else ""
 
-            # Check if we're in the lower module importing from within the lower module
-            # If so, redirect the import to the merged module
-            if (
-                caller_package == self.finder.lower_name
-                or caller_module.startswith(self.finder.lower_name + ".")
-            ) and (
-                name == self.finder.lower_name
-                or name.startswith(self.finder.lower_name + ".")
-            ):
-                name = name.replace(self.finder.lower_name, self.finder.merged_name, 1)
-                log.debug("Redirecting import '%s' to '%s'", original_name, name)
+                # Resolve relative imports from the lower module
+                if level and (
+                    caller_package == self.lower_name
+                    or caller_package.startswith(self.lower_name + ".")
+                ):
+                    # Calculate the absolute names
+                    name = (
+                        ".".join(
+                            caller_package.split(".")[: -level + 1]
+                            + ([name] if name else [])
+                        )
+                        if level > 1
+                        else caller_package + ("." + name if name else "")
+                    )
+                    # Reset the level, as name is now resolved
+                    level = 0
 
-            result = original_import(name, globals, locals, fromlist, level)
+                # Check if we're in the lower module importing from within the lower module
+                # If so, redirect the import to the merged module
+                if (
+                    caller_package == self.finder.lower_name
+                    or caller_module.startswith(self.finder.lower_name + ".")
+                ) and (
+                    name == self.finder.lower_name
+                    or name.startswith(self.finder.lower_name + ".")
+                ):
+                    name = name.replace(
+                        self.finder.lower_name, self.finder.merged_name, 1
+                    )
+                    log.debug("Redirecting import '%s' to '%s'", original_name, name)
 
-            # For relative imports, add the module to the caller's namespace
-            # using the local part of the name
-            if (
-                original_name and original_level
-            ):  # Only if there's a module name (not just dots)
-                local_name = name.split(".")[-1]
-                if globals is not None:
-                    globals[local_name] = result
+                result = original_import(name, globals, locals, fromlist, level)
 
-            log.debug(
-                "Import hook returning module '%s' for import of '%s' (fromlist=%r, level=%r) by '%s'",
-                result.__name__,
-                original_name,
-                fromlist,
-                level,
-                caller_module,
-            )
-            return result
+                # For relative imports, add the module to the caller's namespace
+                # using the local part of the name
+                if (
+                    original_name and original_level
+                ):  # Only if there's a module name (not just dots)
+                    local_name = name.split(".")[-1]
+                    if globals is not None:
+                        globals[local_name] = result
+
+                log.debug(
+                    "Import hook returning module '%s' for import of '%s' (fromlist=%r, level=%r) by '%s'",
+                    result.__name__,
+                    original_name,
+                    fromlist,
+                    level,
+                    caller_module,
+                )
+                return result
 
             # Install custom import if not already installed
             if builtins.__import__ != custom_import:
@@ -221,7 +226,10 @@ class MergedModuleLoader(Loader):
                 yield custom_import
             finally:
                 # Only restore original import if we're the ones who replaced it
-                if builtins.__import__ == custom_import and self._original_import is not None:
+                if (
+                    builtins.__import__ == custom_import
+                    and self._original_import is not None
+                ):
                     builtins.__import__ = self._original_import
                     self._original_import = None
 
@@ -360,18 +368,19 @@ def shim(upper: str, lower: str, as_name: str | None = None) -> ModuleType:
     )
 
     finder = MergedModuleFinder(merged_name, upper, lower)
-    
+
     with MergedModuleFinder._meta_path_lock:
         # Remove any existing finder for this merged module
         sys.meta_path = [
-            f for f in sys.meta_path 
+            f
+            for f in sys.meta_path
             if not (isinstance(f, MergedModuleFinder) and f.merged_name == merged_name)
         ]
         sys.meta_path.insert(0, finder)
 
     # Import the merged module
     merged_module = import_module(merged_name)
-    
+
     with MergedModuleFinder._meta_path_lock:
         sys.modules[merged_name] = merged_module
 
