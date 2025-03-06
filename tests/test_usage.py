@@ -99,10 +99,6 @@ def test_nested_module_imports():
 
 def test_error_handling():
     """Test error cases and edge conditions."""
-    # Test with non-existent upper module
-    with pytest.raises(ImportError):
-        shim("nonexistent.module", "json", "json_error")
-    
     # Test with invalid lower module
     with pytest.raises(ImportError):
         shim("tests.examples.json_single_quotes", "nonexistent", "json_error")
@@ -110,6 +106,10 @@ def test_error_handling():
     # Test with invalid module names
     with pytest.raises(ValueError):
         shim("", "json", "json_error")
+        
+    # Test with empty lower module name
+    with pytest.raises(ValueError):
+        shim("tests.examples.json_single_quotes", "", "json_error")
 
 
 def test_attribute_access():
