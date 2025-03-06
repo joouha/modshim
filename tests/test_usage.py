@@ -1,3 +1,5 @@
+"""Tests for modshim usage patterns and edge cases."""
+
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -105,11 +107,11 @@ def test_error_handling() -> None:
         shim("tests.examples.json_single_quotes", "nonexistent", "json_error")
 
     # Test with invalid module names
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Module name cannot be empty"):
         shim("", "json", "json_error")
 
     # Test with empty lower module name
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Module name cannot be empty"):
         shim("tests.examples.json_single_quotes", "", "json_error")
 
 
@@ -119,7 +121,7 @@ def test_attribute_access() -> None:
 
     # Test accessing non-existent attribute
     with pytest.raises(AttributeError):
-        merged.nonexistent_attribute
+        _ = merged.nonexistent_attribute
 
     # Test accessing dunder attributes
     assert hasattr(merged, "__name__")
@@ -145,7 +147,7 @@ def test_module_reload() -> None:
     # Create underlay module
     lower = ModuleType("test_lower")
 
-    def get_lower_count():
+    def get_lower_count() -> int:
         nonlocal lower_counter
         lower_counter += 1
         return lower_counter
@@ -158,7 +160,7 @@ def test_module_reload() -> None:
     # Create overlay module
     upper = ModuleType("test_upper")
 
-    def get_upper_count():
+    def get_upper_count() -> int:
         nonlocal upper_counter
         upper_counter += 1
         return upper_counter
