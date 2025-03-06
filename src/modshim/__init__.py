@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import logging
 import sys
+import threading
 from contextlib import contextmanager
 from importlib import import_module
 from importlib.abc import Loader, MetaPathFinder
@@ -93,8 +94,9 @@ class MergedModuleLoader(Loader):
         """
         log.debug("Creating module for spec: %r", spec)
         # If already merged, return from cache
-        if spec.name in self.finder.cache:
-            return self.finder.cache[spec.name]
+        with self.finder._cache_lock:
+            if spec.name in self.finder.cache:
+                return self.finder.cache[spec.name]
 
         # Import both modules
         try:
@@ -112,7 +114,8 @@ class MergedModuleLoader(Loader):
         merged.__path__ = getattr(lower_module, "__path__", None)
 
         # Store in cache
-        self.finder.cache[spec.name] = merged
+        with self.finder._cache_lock:
+            self.finder.cache[spec.name] = merged
         return merged
 
     @contextmanager
@@ -245,6 +248,8 @@ class MergedModuleLoader(Loader):
 class MergedModuleFinder(MetaPathFinder):
     """Finder that creates merged modules combining upper and lower modules."""
 
+    _meta_path_lock = threading.Lock()
+
     def __init__(
         self,
         merged_name: str,
@@ -259,6 +264,7 @@ class MergedModuleFinder(MetaPathFinder):
             lower_name: Name of the lower base module
         """
         self.cache: dict[str, ModuleType] = {}
+        self._cache_lock = threading.Lock()
         """Initialize finder with module names.
 
         Args:
@@ -343,10 +349,19 @@ def shim(upper: str, lower: str, as_name: str | None = None) -> ModuleType:
     )
 
     finder = MergedModuleFinder(merged_name, upper, lower)
-    sys.meta_path.insert(0, finder)
+    
+    with MergedModuleFinder._meta_path_lock:
+        # Remove any existing finder for this merged module
+        sys.meta_path = [
+            f for f in sys.meta_path 
+            if not (isinstance(f, MergedModuleFinder) and f.merged_name == merged_name)
+        ]
+        sys.meta_path.insert(0, finder)
 
     # Import the merged module
     merged_module = import_module(merged_name)
-    sys.modules[merged_name] = merged_module
+    
+    with MergedModuleFinder._meta_path_lock:
+        sys.modules[merged_name] = merged_module
 
     return merged_module
