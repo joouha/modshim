@@ -87,7 +87,6 @@ class MergedModuleLoader(Loader):
         self.lower_name = lower_name
         self.finder = finder
 
-        self._import_lock = threading.RLock()  # Instance level lock
         self._original_import = None
 
     def create_module(self, spec: ModuleSpec) -> ModuleType:
@@ -201,7 +200,7 @@ class MergedModuleLoader(Loader):
         Yields:
             The custom import function that was temporarily installed.
         """
-        with self._global_import_lock:  # and self._import_lock:
+        with self._global_import_lock:
             if self._original_import is None:
                 self._original_import = builtins.__import__
 
