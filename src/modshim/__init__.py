@@ -25,7 +25,11 @@ class MergedModule(ModuleType):
     """A module that combines attributes from upper and lower modules."""
 
     def __init__(
-        self, name: str, upper_module: ModuleType, lower_module: ModuleType, finder: MergedModuleFinder
+        self,
+        name: str,
+        upper_module: ModuleType,
+        lower_module: ModuleType,
+        finder: MergedModuleFinder,
     ) -> None:
         """Initialize merged module with upper and lower modules.
 
@@ -115,11 +119,11 @@ class MergedModuleLoader(Loader):
         lower_spec = find_spec(self.lower_name)
         if lower_spec is None:
             raise ImportError(f"No module named '{self.lower_name}'")
-        
+
         lower_module = module_from_spec(lower_spec)
 
         # Create merged module
-        merged = MergedModule(spec.name, upper_module, lower_module, self)
+        merged = MergedModule(spec.name, upper_module, lower_module, self.finder)
         merged.__package__ = spec.parent
         merged.__path__ = getattr(lower_module, "__path__", None)
 
@@ -276,7 +280,7 @@ class MergedModuleFinder(MetaPathFinder):
 
     def cleanup(self) -> None:
         """Clean up this finder and its associated modules.
-        
+
         Removes the finder from sys.meta_path, clears its cache,
         and removes associated modules from sys.modules.
         """
@@ -286,17 +290,18 @@ class MergedModuleFinder(MetaPathFinder):
                 if self in sys.meta_path:
                     sys.meta_path.remove(self)
                     self.cache.clear()
-                
+
                 # Remove all associated modules from sys.modules
                 # This includes both the main module and any submodules
                 modules_to_remove = [
-                    name for name in sys.modules
-                    if name == self.merged_name 
+                    name
+                    for name in sys.modules
+                    if name == self.merged_name
                     or name.startswith(f"{self.merged_name}.")
                 ]
                 for name in modules_to_remove:
                     del sys.modules[name]
-                    
+
         except Exception:  # noqa: S110
             # Ignore cleanup errors during interpreter shutdown
             pass
