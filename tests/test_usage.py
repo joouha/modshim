@@ -202,19 +202,28 @@ def test_import_hook_cleanup():
     
     # Count initial meta_path entries
     initial_meta_path_count = len(sys.meta_path)
+    initial_finders = [f for f in sys.meta_path if isinstance(f, MergedModuleFinder)]
     
     # Create and remove several shims
     shim1 = shim("tests.examples.json_single_quotes", "json", "json_cleanup1")
     shim2 = shim("tests.examples.json_single_quotes", "json", "json_cleanup2")
     
-    # Force cleanup
-    del shim1
-    del shim2
+    # Force cleanup explicitly rather than relying on __del__
+    shim1._finder.cleanup()
+    shim2._finder.cleanup()
     
-    # Force garbage collection to run __del__ methods
+    # Clean up modules
+    if "json_cleanup1" in sys.modules:
+        del sys.modules["json_cleanup1"]
+    if "json_cleanup2" in sys.modules:
+        del sys.modules["json_cleanup2"]
+    
+    # Force garbage collection
     gc.collect()
     
     # Verify meta_path is cleaned up
+    current_finders = [f for f in sys.meta_path if isinstance(f, MergedModuleFinder)]
+    assert len(current_finders) == len(initial_finders)
     assert len(sys.meta_path) == initial_meta_path_count
 
 
