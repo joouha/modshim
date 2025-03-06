@@ -25,7 +25,7 @@ class MergedModule(ModuleType):
     """A module that combines attributes from upper and lower modules."""
 
     def __init__(
-        self, name: str, upper_module: ModuleType, lower_module: ModuleType
+        self, name: str, upper_module: ModuleType, lower_module: ModuleType, finder: MergedModuleFinder
     ) -> None:
         """Initialize merged module with upper and lower modules.
 
@@ -33,10 +33,30 @@ class MergedModule(ModuleType):
             name: Name of the merged module
             upper_module: Module containing overrides
             lower_module: Base module to enhance
+            finder: The finder that created this module
         """
         super().__init__(name)
         self._upper = upper_module
         self._lower = lower_module
+        self._finder = finder
+        
+    def __del__(self) -> None:
+        """Clean up module if it's the top-level merged module."""
+        # Only clean up if we're the top-level module for this merge
+        if self.__name__ == self._finder.merged_name:
+            try:
+                # Remove finder from sys.meta_path if it's still there
+                with self._finder._meta_path_lock:
+                    if self._finder in sys.meta_path:
+                        sys.meta_path.remove(self._finder)
+                        self._finder.cache.clear()
+                
+                # Remove module from sys.modules if still there
+                if self.__name__ in sys.modules:
+                    del sys.modules[self.__name__]
+            except Exception:  # noqa: S110
+                # Ignore cleanup errors during interpreter shutdown
+                pass
 
     def __getattr__(self, name: str) -> Any:
         """Get an attribute from either upper or lower module.
@@ -117,7 +137,7 @@ class MergedModuleLoader(Loader):
         lower_module = module_from_spec(lower_spec)
 
         # Create merged module
-        merged = MergedModule(spec.name, upper_module, lower_module)
+        merged = MergedModule(spec.name, upper_module, lower_module, self)
         merged.__package__ = spec.parent
         merged.__path__ = getattr(lower_module, "__path__", None)
 
