@@ -70,6 +70,9 @@ class MergedModuleLoader(Loader):
         lower_name: str,
         finder: MetaPathFinder,
     ) -> None:
+        super().__init__()
+        self._import_lock = threading.Lock()
+        self._original_import = None
         """Initialize the loader with module names and cache.
 
         Args:
@@ -131,6 +134,8 @@ class MergedModuleLoader(Loader):
         that redirects imports within the lower module to the corresponding merged module.
         This ensures that internal imports in the lower module are properly handled.
 
+        Thread-safe: Uses instance-specific lock to prevent concurrent modifications to builtins.__import__
+
         Yields:
             The custom import function that was temporarily installed.
 
@@ -139,10 +144,12 @@ class MergedModuleLoader(Loader):
                 # Imports within this block will use the custom import hook
                 module.load()
         """
-        # Store original import
-        original_import = builtins.__import__
+        with self._import_lock:
+            # Only replace import if we haven't already
+            if self._original_import is None:
+                self._original_import = builtins.__import__
 
-        def custom_import(
+            def custom_import(
             name: str,
             globals: dict[str, Any] | None = None,
             locals: dict[str, Any] | None = None,
@@ -206,13 +213,17 @@ class MergedModuleLoader(Loader):
             )
             return result
 
-        # Install custom import
-        builtins.__import__ = custom_import
-        yield
-        # Restore original import function
-        builtins.__import__ = original_import
+            # Install custom import if not already installed
+            if builtins.__import__ != custom_import:
+                builtins.__import__ = custom_import
 
-        return custom_import
+            try:
+                yield custom_import
+            finally:
+                # Only restore original import if we're the ones who replaced it
+                if builtins.__import__ == custom_import and self._original_import is not None:
+                    builtins.__import__ = self._original_import
+                    self._original_import = None
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute a merged module by combining upper and lower modules.
