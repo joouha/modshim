@@ -39,22 +39,6 @@ class MergedModule(ModuleType):
         self._upper = upper_module
         self._lower = lower_module
         self._finder = finder
-        
-    def __init__(
-        self, name: str, upper_module: ModuleType, lower_module: ModuleType, finder: MergedModuleFinder
-    ) -> None:
-        """Initialize merged module with upper and lower modules.
-
-        Args:
-            name: Name of the merged module
-            upper_module: Module containing overrides
-            lower_module: Base module to enhance
-            finder: The finder that created this module
-        """
-        super().__init__(name)
-        self._upper = upper_module
-        self._lower = lower_module
-        self._finder = finder
 
     def __getattr__(self, name: str) -> Any:
         """Get an attribute from either upper or lower module.
@@ -291,13 +275,31 @@ class MergedModuleFinder(MetaPathFinder):
     _meta_path_lock = threading.Lock()
 
     def cleanup(self) -> None:
-        """Clean up this finder and its associated modules."""
-        with self._meta_path_lock:
-            if self in sys.meta_path:
-                sys.meta_path.remove(self)
-            self.cache.clear()
-            if self.merged_name in sys.modules:
-                del sys.modules[self.merged_name]
+        """Clean up this finder and its associated modules.
+        
+        Removes the finder from sys.meta_path, clears its cache,
+        and removes associated modules from sys.modules.
+        """
+        try:
+            # Remove finder from sys.meta_path if it's still there
+            with self._meta_path_lock:
+                if self in sys.meta_path:
+                    sys.meta_path.remove(self)
+                    self.cache.clear()
+                
+                # Remove all associated modules from sys.modules
+                # This includes both the main module and any submodules
+                modules_to_remove = [
+                    name for name in sys.modules
+                    if name == self.merged_name 
+                    or name.startswith(f"{self.merged_name}.")
+                ]
+                for name in modules_to_remove:
+                    del sys.modules[name]
+                    
+        except Exception:  # noqa: S110
+            # Ignore cleanup errors during interpreter shutdown
+            pass
 
     def __init__(
         self,
