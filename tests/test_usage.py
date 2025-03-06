@@ -2,7 +2,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from modshim import shim
+
+from modshim import MergedModuleFinder, shim
 
 
 def test_multiple_registrations():
@@ -86,11 +87,11 @@ def test_nested_module_imports():
     """Test that nested/submodule imports work correctly."""
     # Create a shim that includes submodules
     shim("tests.examples.urllib_punycode", "urllib", "urllib_nested")
-    
+
     # Try importing various submodules
-    from urllib_nested.parse import urlparse
     from urllib_nested import parse
-    
+    from urllib_nested.parse import urlparse
+
     # Verify both import styles work
     url = "https://xn--bcher-kva.example.com/path"
     assert urlparse(url).netloc == "bücher.example.com"
@@ -102,11 +103,11 @@ def test_error_handling():
     # Test with invalid lower module
     with pytest.raises(ImportError):
         shim("tests.examples.json_single_quotes", "nonexistent", "json_error")
-        
+
     # Test with invalid module names
     with pytest.raises(ValueError):
         shim("", "json", "json_error")
-        
+
     # Test with empty lower module name
     with pytest.raises(ValueError):
         shim("tests.examples.json_single_quotes", "", "json_error")
@@ -115,15 +116,15 @@ def test_error_handling():
 def test_attribute_access():
     """Test various attribute access patterns on shimmed modules."""
     merged = shim("tests.examples.json_single_quotes", "json", "json_attrs")
-    
+
     # Test accessing non-existent attribute
     with pytest.raises(AttributeError):
         merged.nonexistent_attribute
-        
+
     # Test accessing dunder attributes
     assert hasattr(merged, "__name__")
     assert merged.__name__ == "json_attrs"
-    
+
     # Test dir() functionality
     attrs = dir(merged)
     assert "dumps" in attrs
@@ -143,39 +144,43 @@ def test_module_reload():
 
     # Create underlay module
     lower = ModuleType("test_lower")
+
     def get_lower_count():
         nonlocal lower_counter
         lower_counter += 1
         return lower_counter
+
     lower.get_count = get_lower_count
     # Create a spec for the lower module
     lower.__spec__ = ModuleSpec("test_lower", None)
     sys.modules["test_lower"] = lower
 
-    # Create overlay module 
+    # Create overlay module
     upper = ModuleType("test_upper")
+
     def get_upper_count():
         nonlocal upper_counter
         upper_counter += 1
         return upper_counter
+
     upper.get_count = get_upper_count
     # Create a spec for the upper module
     upper.__spec__ = ModuleSpec("test_upper", None)
     sys.modules["test_upper"] = upper
-    
+
     # Create merged module
     merged = shim("test_upper", "test_lower", "test_merged")
-    
+
     # Initial counts should be 1
     assert merged.get_count() == 1  # Gets upper's count
-    
+
     # Reload the module
     reloaded = importlib.reload(merged)
-    
+
     # Verify both modules were re-executed
     assert reloaded is merged  # Same module object
     assert merged.get_count() == 2  # Count increased after reload
-    
+
     # Clean up
     del sys.modules["test_upper"]
     del sys.modules["test_lower"]
@@ -185,42 +190,43 @@ def test_module_reload():
 def test_package_paths():
     """Test that __path__ and package attributes are handled correctly."""
     merged = shim("tests.examples.pathlib_is_empty", "pathlib", "pathlib_paths")
-    
+
     # Verify package attributes are set correctly
     assert hasattr(merged, "__path__")
     assert merged.__package__ == "pathlib_paths"
-    
+
     # Test importing from package
     from pathlib_paths import Path
+
     assert hasattr(Path, "is_empty")
 
 
 def test_import_hook_cleanup():
     """Test that import hooks are properly cleaned up."""
-    import sys
     import gc
-    
+    import sys
+
     # Count initial meta_path entries
     initial_meta_path_count = len(sys.meta_path)
     initial_finders = [f for f in sys.meta_path if isinstance(f, MergedModuleFinder)]
-    
+
     # Create and remove several shims
     shim1 = shim("tests.examples.json_single_quotes", "json", "json_cleanup1")
     shim2 = shim("tests.examples.json_single_quotes", "json", "json_cleanup2")
-    
+
     # Force cleanup explicitly rather than relying on __del__
     shim1._finder.cleanup()
     shim2._finder.cleanup()
-    
+
     # Clean up modules
     if "json_cleanup1" in sys.modules:
         del sys.modules["json_cleanup1"]
     if "json_cleanup2" in sys.modules:
         del sys.modules["json_cleanup2"]
-    
+
     # Force garbage collection
     gc.collect()
-    
+
     # Verify meta_path is cleaned up
     current_finders = [f for f in sys.meta_path if isinstance(f, MergedModuleFinder)]
     assert len(current_finders) == len(initial_finders)
@@ -230,12 +236,12 @@ def test_import_hook_cleanup():
 def test_context_preservation():
     """Test that module context (__file__, __package__, etc.) is preserved."""
     merged = shim("tests.examples.json_single_quotes", "json", "json_context")
-    
+
     # Verify important context attributes
     assert hasattr(merged, "__file__")
     assert hasattr(merged, "__package__")
     assert hasattr(merged, "__spec__")
-    
+
     # Verify they contain sensible values
     assert merged.__package__ == "json_context"
     assert merged.__spec__ is not None
