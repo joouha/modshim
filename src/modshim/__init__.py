@@ -302,9 +302,8 @@ class MergedModuleFinder(MetaPathFinder):
                         # Module already removed
                         pass
 
-        except (ImportError, AttributeError) as e:
+        except (ImportError, AttributeError):
             # Only catch specific errors that might occur during shutdown
-            import sys
             if not sys.is_finalizing():
                 raise
 

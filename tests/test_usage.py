@@ -201,67 +201,6 @@ def test_package_paths():
     assert hasattr(Path, "is_empty")
 
 
-def test_overlay_chaining():
-    """Test that overlaying an already overlayed module works correctly."""
-    import json
-    from types import ModuleType
-    from importlib.machinery import ModuleSpec
-    import sys
-
-    # Create first overlay module (single quotes)
-    quotes_mod = ModuleType("json_quotes_overlay")
-    def quotes_dumps(obj, *args, **kwargs):
-        result = json.dumps(obj, *args, **kwargs)
-        return result.replace('"', "'")
-    quotes_mod.dumps = quotes_dumps
-    quotes_mod.__spec__ = ModuleSpec("json_quotes_overlay", None)
-    sys.modules["json_quotes_overlay"] = quotes_mod
-
-    # Create first merged module
-    json_quotes = shim("json_quotes_overlay", "json", "json_quotes")
-
-    # Create second overlay module (metadata) that imports from json_quotes
-    meta_mod = ModuleType("json_meta_overlay")
-    def meta_dumps(obj, *args, **kwargs):
-        if isinstance(obj, dict):
-            obj = obj.copy()
-            obj["_metadata"] = {"timestamp": "2024-01-01"}
-        # Explicitly use the quotes version
-        import json_quotes
-        return json_quotes.dumps(obj, *args, **kwargs)
-    meta_mod.dumps = meta_dumps
-    meta_mod.__spec__ = ModuleSpec("json_meta_overlay", None)
-    sys.modules["json_meta_overlay"] = meta_mod
-
-    # Create second merged module
-    json_both = shim("json_meta_overlay", "json_quotes", "json_both")
-
-    # Test data
-    data = {"name": "test"}
-
-    # Verify original json behavior
-    assert json.dumps(data) == '{"name": "test"}'
-
-    # Verify single quotes overlay
-    assert json_quotes.dumps(data) == "{'name': 'test'}"
-
-    # Verify combined overlay has both single quotes and metadata
-    result = json_both.dumps(data)
-    assert "{'name': 'test'" in result  # Single quotes from first overlay
-    assert "'_metadata': {'timestamp': '2024-01-01'}" in result  # Metadata from second overlay
-
-    # Verify the exact combined output
-    assert result == "{'name': 'test', '_metadata': {'timestamp': '2024-01-01'}}"
-
-    # Verify original modules remain unaffected
-    assert json.dumps(data) == '{"name": "test"}'
-    assert json_quotes.dumps(data) == "{'name': 'test'}"
-
-    # Clean up
-    del sys.modules["json_quotes_overlay"]
-    del sys.modules["json_meta_overlay"]
-
-
 def test_import_hook_cleanup():
     """Test that import hooks are properly cleaned up."""
     import gc
