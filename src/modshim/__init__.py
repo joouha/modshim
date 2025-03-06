@@ -86,7 +86,6 @@ class MergedModuleLoader(Loader):
         self.upper_name = upper_name
         self.lower_name = lower_name
         self.finder = finder
-
         self._original_import = None
 
     def create_module(self, spec: ModuleSpec) -> ModuleType:
@@ -282,18 +281,11 @@ class MergedModuleFinder(MetaPathFinder):
             upper_name: Name of the upper module with overrides
             lower_name: Name of the lower base module
         """
-        self.cache: dict[str, ModuleType] = {}
-        self._cache_lock = threading.Lock()
-        """Initialize finder with module names.
-
-        Args:
-            merged_name: Name of the merged module
-            upper_name: Name of the upper module with overrides
-            lower_name: Name of the lower base module
-        """
         self.merged_name = merged_name
         self.upper_name = upper_name
         self.lower_name = lower_name
+        self.cache: dict[str, ModuleType] = {}
+        self._cache_lock = threading.Lock()
 
     def find_spec(
         self,
