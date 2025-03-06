@@ -30,18 +30,6 @@ def encode_basestring_ascii(s: str) -> str:
 class JSONEncoder(OgJSONEncoder):
     """JSON encoder that uses single quotes for strings."""
 
-    def encode(self, o: object) -> str:
-        """Return a JSON string representation of a Python object."""
-        if isinstance(o, str):
-            if self.ensure_ascii:
-                return encode_basestring_ascii(o)
-            else:
-                return encode_basestring(o)
-        chunks = self.iterencode(o, _one_shot=True)
-        if not isinstance(chunks, (list, tuple)):
-            chunks = list(chunks)
-        return "".join(chunks)
-
     def iterencode(self, o: object, _one_shot: bool = False) -> Iterator[str]:
         """Encode the given object and yield each string representation as available."""
         if self.check_circular:
