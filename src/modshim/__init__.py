@@ -149,9 +149,9 @@ class MergedModuleLoader(Loader):
             # Only replace import if we haven't already
             if self._original_import is None:
                 self._original_import = builtins.__import__
-            
+
             original_import = self._original_import
-            
+
             def custom_import(
                 name: str,
                 globals: dict[str, Any] | None = None,
