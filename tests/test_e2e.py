@@ -202,6 +202,41 @@ def test_urllib_punycode_override() -> None:
     assert orig_result.netloc == "xn--bcher-kva.example.com"
 
 
+def test_json_layered_override() -> None:
+    """Test that multiple JSON overrides can be layered."""
+    # First create the single quotes shim
+    shim(
+        lower="json",
+        upper="tests.examples.json_single_quotes",
+        as_name="json_formatted_quotes",
+    )
+    
+    # Then layer the formatting shim on top
+    shim(
+        lower="json_formatted_quotes", 
+        upper="tests.examples.json_formatted",
+        as_name="json_layered",
+    )
+
+    import json
+    from json_layered import dumps
+
+    data = {"b": "test", "a": ["x", "y"]}
+    
+    # Our version uses single quotes and consistent formatting
+    expected = """{
+  'a': [
+    'x',
+    'y'
+  ],
+  'b': 'test'
+}"""
+    assert dumps(data) == expected
+
+    # Original json module should be unaffected
+    assert json.dumps(data) == '{"b": "test", "a": ["x", "y"]}'
+
+
 def test_csv_schema_override() -> None:
     """Test that csv module supports schema validation."""
     shim(lower="csv", upper="tests.examples.csv_schema", as_name="csv_schema")
