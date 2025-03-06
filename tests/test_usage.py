@@ -201,6 +201,37 @@ def test_package_paths():
     assert hasattr(Path, "is_empty")
 
 
+def test_overlay_chaining():
+    """Test that overlaying an already overlayed module works correctly."""
+    # First create a shim with single quotes
+    json_quotes = shim("tests.examples.json_single_quotes", "json", "json_quotes")
+    
+    # Then create a shim that overlays the single quotes version with metadata
+    json_both = shim("tests.examples.json_metadata", "json_quotes", "json_both")
+    
+    # Test data
+    data = {"name": "test"}
+    
+    # Verify original json behavior
+    import json
+    assert json.dumps(data) == '{"name": "test"}'
+    
+    # Verify single quotes overlay
+    assert json_quotes.dumps(data) == "{'name': 'test'}"
+    
+    # Verify combined overlay has both single quotes and metadata
+    result = json_both.dumps(data)
+    assert "{'name': 'test'" in result  # Single quotes from first overlay
+    assert "'_metadata': {'timestamp': '2024-01-01'}" in result  # Metadata from second overlay
+    
+    # Verify the exact combined output
+    assert result == "{'name': 'test', '_metadata': {'timestamp': '2024-01-01'}}"
+    
+    # Verify original modules remain unaffected
+    assert json.dumps(data) == '{"name": "test"}'
+    assert json_quotes.dumps(data) == "{'name': 'test'}"
+
+
 def test_import_hook_cleanup():
     """Test that import hooks are properly cleaned up."""
     import gc
