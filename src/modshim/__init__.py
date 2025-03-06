@@ -63,6 +63,9 @@ class MergedModule(ModuleType):
 class MergedModuleLoader(Loader):
     """Loader that creates merged modules combining upper and lower modules."""
 
+    # Class-level lock for import operations
+    _global_import_lock = threading.RLock()  # Use RLock to allow recursive locking
+
     def __init__(
         self,
         merged_name: str,
@@ -84,7 +87,7 @@ class MergedModuleLoader(Loader):
         self.lower_name = lower_name
         self.finder = finder
 
-        self._import_lock = threading.Lock()
+        self._import_lock = threading.RLock()  # Instance level lock
         self._original_import = None
 
     def create_module(self, spec: ModuleSpec) -> ModuleType:
@@ -122,6 +125,73 @@ class MergedModuleLoader(Loader):
             self.finder.cache[spec.name] = merged
         return merged
 
+    def _do_import(
+        self,
+        original_import: Callable,
+        name: str,
+        globals: dict[str, Any] | None,
+        locals: dict[str, Any] | None,
+        fromlist: tuple[str, ...],
+        level: int,
+    ) -> ModuleType:
+        """Perform the actual import operation."""
+        log.debug(
+            "Importing: %s (fromlist=%r, level=%r)", name, fromlist, level
+        )
+        original_name = name
+        original_level = level
+        # Get calling module name
+        caller_package = globals.get("__package__", "") if globals else ""
+        caller_module = globals.get("__name__", "") if globals else ""
+
+        # Resolve relative imports from the lower module
+        if level and (
+            caller_package == self.lower_name
+            or caller_package.startswith(self.lower_name + ".")
+        ):
+            # Calculate the absolute names
+            name = (
+                ".".join(
+                    caller_package.split(".")[: -level + 1]
+                    + ([name] if name else [])
+                )
+                if level > 1
+                else caller_package + ("." + name if name else "")
+            )
+            # Reset the level, as name is now resolved
+            level = 0
+
+        # Check if we're in the lower module importing from within the lower module
+        if (
+            caller_package == self.finder.lower_name
+            or caller_module.startswith(self.finder.lower_name + ".")
+        ) and (
+            name == self.finder.lower_name
+            or name.startswith(self.finder.lower_name + ".")
+        ):
+            name = name.replace(
+                self.finder.lower_name, self.finder.merged_name, 1
+            )
+            log.debug("Redirecting import '%s' to '%s'", original_name, name)
+
+        result = original_import(name, globals, locals, fromlist, level)
+
+        # For relative imports, add the module to the caller's namespace
+        if original_name and original_level:
+            local_name = name.split(".")[-1]
+            if globals is not None:
+                globals[local_name] = result
+
+        log.debug(
+            "Import hook returning module '%s' for import of '%s' (fromlist=%r, level=%r) by '%s'",
+            result.__name__,
+            original_name,
+            fromlist,
+            level,
+            caller_module,
+        )
+        return result
+
     @contextmanager
     def hook_imports(
         self,
@@ -131,109 +201,43 @@ class MergedModuleLoader(Loader):
     ]:
         """Temporarily install a custom import hook for handling merged modules.
 
-        This context manager replaces the built-in __import__ function with a custom one
-        that redirects imports within the lower module to the corresponding merged module.
-        This ensures that internal imports in the lower module are properly handled.
-
-        Thread-safe: Uses instance-specific lock to prevent concurrent modifications to builtins.__import__
+        Thread-safe: Uses global and instance-specific locks to prevent concurrent modifications.
 
         Yields:
             The custom import function that was temporarily installed.
-
-        Example:
-            with hook_imports():
-                # Imports within this block will use the custom import hook
-                module.load()
         """
-        with self._import_lock:
-            # Only replace import if we haven't already
-            if self._original_import is None:
-                self._original_import = builtins.__import__
+        with self._global_import_lock:
+            with self._import_lock:
+                if self._original_import is None:
+                    self._original_import = builtins.__import__
 
-            original_import = self._original_import
+                original_import = self._original_import
 
-            def custom_import(
-                name: str,
-                globals: dict[str, Any] | None = None,
-                locals: dict[str, Any] | None = None,
-                fromlist: tuple[str, ...] = (),
-                level: int = 0,
-            ) -> ModuleType:
-                log.debug(
-                    "Importing: %s (fromlist=%r, level=%r)", name, fromlist, level
-                )
-                original_name = name
-                original_level = level
-                # Get calling module name
-                caller_package = globals.get("__package__", "") if globals else ""
-                caller_module = globals.get("__name__", "") if globals else ""
-
-                # Resolve relative imports from the lower module
-                if level and (
-                    caller_package == self.lower_name
-                    or caller_package.startswith(self.lower_name + ".")
-                ):
-                    # Calculate the absolute names
-                    name = (
-                        ".".join(
-                            caller_package.split(".")[: -level + 1]
-                            + ([name] if name else [])
+                def custom_import(
+                    name: str,
+                    globals: dict[str, Any] | None = None,
+                    locals: dict[str, Any] | None = None,
+                    fromlist: tuple[str, ...] = (),
+                    level: int = 0,
+                ) -> ModuleType:
+                    with self._global_import_lock:
+                        return self._do_import(
+                            original_import, name, globals, locals, fromlist, level
                         )
-                        if level > 1
-                        else caller_package + ("." + name if name else "")
-                    )
-                    # Reset the level, as name is now resolved
-                    level = 0
 
-                # Check if we're in the lower module importing from within the lower module
-                # If so, redirect the import to the merged module
-                if (
-                    caller_package == self.finder.lower_name
-                    or caller_module.startswith(self.finder.lower_name + ".")
-                ) and (
-                    name == self.finder.lower_name
-                    or name.startswith(self.finder.lower_name + ".")
-                ):
-                    name = name.replace(
-                        self.finder.lower_name, self.finder.merged_name, 1
-                    )
-                    log.debug("Redirecting import '%s' to '%s'", original_name, name)
+                current_import = builtins.__import__
+                if current_import != custom_import:
+                    builtins.__import__ = custom_import
 
-                result = original_import(name, globals, locals, fromlist, level)
-
-                # For relative imports, add the module to the caller's namespace
-                # using the local part of the name
-                if (
-                    original_name and original_level
-                ):  # Only if there's a module name (not just dots)
-                    local_name = name.split(".")[-1]
-                    if globals is not None:
-                        globals[local_name] = result
-
-                log.debug(
-                    "Import hook returning module '%s' for import of '%s' (fromlist=%r, level=%r) by '%s'",
-                    result.__name__,
-                    original_name,
-                    fromlist,
-                    level,
-                    caller_module,
-                )
-                return result
-
-            # Install custom import if not already installed
-            if builtins.__import__ != custom_import:
-                builtins.__import__ = custom_import
-
-            try:
-                yield custom_import
-            finally:
-                # Only restore original import if we're the ones who replaced it
-                if (
-                    builtins.__import__ == custom_import
-                    and self._original_import is not None
-                ):
-                    builtins.__import__ = self._original_import
-                    self._original_import = None
+                try:
+                    yield custom_import
+                finally:
+                    if (
+                        builtins.__import__ == custom_import
+                        and self._original_import is not None
+                    ):
+                        builtins.__import__ = self._original_import
+                        self._original_import = None
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute a merged module by combining upper and lower modules.
@@ -248,22 +252,23 @@ class MergedModuleLoader(Loader):
             self.lower_name,
         )
 
-        with self.hook_imports():
-            # Re-execute lower module with our import hook active
-            # - this ensures internal imports go through our hook
-            log.debug("Executing '%s'", module._lower.__spec__.name)
-            module._lower.__spec__.loader.exec_module(module._lower)
-            log.debug("Executed '%s'", module._lower.__spec__.name)
+        # Use global lock for entire module execution
+        with self._global_import_lock:
+            with self.hook_imports():
+                # Re-execute lower module with our import hook active
+                log.debug("Executing '%s'", module._lower.__spec__.name)
+                module._lower.__spec__.loader.exec_module(module._lower)
+                log.debug("Executed '%s'", module._lower.__spec__.name)
 
-        # Copy attributes from lower first
-        for name, value in vars(module._lower).items():
-            if not name.startswith("__"):
-                setattr(module, name, value)
+            # Copy attributes from lower first
+            for name, value in vars(module._lower).items():
+                if not name.startswith("__"):
+                    setattr(module, name, value)
 
-        # Then overlay upper module attributes
-        for name, value in vars(module._upper).items():
-            if not name.startswith("__"):
-                setattr(module, name, value)
+            # Then overlay upper module attributes
+            for name, value in vars(module._upper).items():
+                if not name.startswith("__"):
+                    setattr(module, name, value)
 
 
 class MergedModuleFinder(MetaPathFinder):
