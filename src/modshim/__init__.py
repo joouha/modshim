@@ -245,14 +245,20 @@ class MergedModuleLoader(Loader):
 class MergedModuleFinder(MetaPathFinder):
     """Finder that creates merged modules combining upper and lower modules."""
 
-    cache: ClassVar[dict[str, ModuleType]] = {}
-
     def __init__(
         self,
         merged_name: str,
         upper_name: str,
         lower_name: str,
     ) -> None:
+        """Initialize finder with module names.
+
+        Args:
+            merged_name: Name of the merged module
+            upper_name: Name of the upper module with overrides
+            lower_name: Name of the lower base module
+        """
+        self.cache: dict[str, ModuleType] = {}
         """Initialize finder with module names.
 
         Args:
