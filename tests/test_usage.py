@@ -33,7 +33,7 @@ def test_multiple_registrations() -> None:
 def test_concurrent_shims() -> None:
     """Test that multiple threads can safely create and use shims."""
 
-    def create_and_use_shim(i):
+    def create_and_use_shim(i: int) -> str:
         # Create unique module names for this thread
         upper = "tests.examples.json_single_quotes"
         lower = "json"
@@ -67,7 +67,7 @@ def test_concurrent_access() -> None:
     # Create a single shim first
     merged = shim("tests.examples.json_single_quotes", "json", "json_shim_shared")
 
-    def use_shim():
+    def use_shim() -> str:
         result = merged.dumps({"test": "value"})
         assert isinstance(result, str)
         assert result == "{'test': 'value'}"
