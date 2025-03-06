@@ -133,18 +133,48 @@ def test_attribute_access():
 def test_module_reload():
     """Test behavior when reloading shimmed modules."""
     import importlib
+    import sys
+    from types import ModuleType
+
+    # Create in-memory modules with counters
+    upper_counter = 0
+    lower_counter = 0
+
+    # Create underlay module
+    lower = ModuleType("test_lower")
+    def get_lower_count():
+        nonlocal lower_counter
+        lower_counter += 1
+        return lower_counter
+    lower.get_count = get_lower_count
+    sys.modules["test_lower"] = lower
+
+    # Create overlay module 
+    upper = ModuleType("test_upper")
+    def get_upper_count():
+        nonlocal upper_counter
+        upper_counter += 1
+        return upper_counter
+    upper.get_count = get_upper_count
+    sys.modules["test_upper"] = upper
     
-    merged = shim("tests.examples.json_single_quotes", "json", "json_reload")
+    # Create merged module
+    merged = shim("test_upper", "test_lower", "test_merged")
     
-    # Store original state
-    original_id = id(merged)
+    # Initial counts should be 1
+    assert merged.get_count() == 1  # Gets upper's count
     
     # Reload the module
     reloaded = importlib.reload(merged)
     
-    # Verify behavior
-    assert id(reloaded) != original_id
-    assert reloaded.dumps({"test": "value"}) == "{'test': 'value'}"
+    # Verify both modules were re-executed
+    assert reloaded is merged  # Same module object
+    assert merged.get_count() == 2  # Count increased after reload
+    
+    # Clean up
+    del sys.modules["test_upper"]
+    del sys.modules["test_lower"]
+    del sys.modules["test_merged"]
 
 
 def test_package_paths():
