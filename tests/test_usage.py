@@ -198,6 +198,7 @@ def test_package_paths():
 def test_import_hook_cleanup():
     """Test that import hooks are properly cleaned up."""
     import sys
+    import gc
     
     # Count initial meta_path entries
     initial_meta_path_count = len(sys.meta_path)
@@ -209,6 +210,9 @@ def test_import_hook_cleanup():
     # Force cleanup
     del shim1
     del shim2
+    
+    # Force garbage collection to run __del__ methods
+    gc.collect()
     
     # Verify meta_path is cleaned up
     assert len(sys.meta_path) == initial_meta_path_count
