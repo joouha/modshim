@@ -135,9 +135,7 @@ class MergedModuleLoader(Loader):
         level: int,
     ) -> ModuleType:
         """Perform the actual import operation."""
-        log.debug(
-            "Importing: %s (fromlist=%r, level=%r)", name, fromlist, level
-        )
+        log.debug("Importing: %s (fromlist=%r, level=%r)", name, fromlist, level)
         original_name = name
         original_level = level
         # Get calling module name
@@ -152,8 +150,7 @@ class MergedModuleLoader(Loader):
             # Calculate the absolute names
             name = (
                 ".".join(
-                    caller_package.split(".")[: -level + 1]
-                    + ([name] if name else [])
+                    caller_package.split(".")[: -level + 1] + ([name] if name else [])
                 )
                 if level > 1
                 else caller_package + ("." + name if name else "")
@@ -169,9 +166,7 @@ class MergedModuleLoader(Loader):
             name == self.finder.lower_name
             or name.startswith(self.finder.lower_name + ".")
         ):
-            name = name.replace(
-                self.finder.lower_name, self.finder.merged_name, 1
-            )
+            name = name.replace(self.finder.lower_name, self.finder.merged_name, 1)
             log.debug("Redirecting import '%s' to '%s'", original_name, name)
 
         result = original_import(name, globals, locals, fromlist, level)
@@ -206,38 +201,37 @@ class MergedModuleLoader(Loader):
         Yields:
             The custom import function that was temporarily installed.
         """
-        with self._global_import_lock:
-            with self._import_lock:
-                if self._original_import is None:
-                    self._original_import = builtins.__import__
+        with self._global_import_lock:  # and self._import_lock:
+            if self._original_import is None:
+                self._original_import = builtins.__import__
 
-                original_import = self._original_import
+            original_import = self._original_import
 
-                def custom_import(
-                    name: str,
-                    globals: dict[str, Any] | None = None,
-                    locals: dict[str, Any] | None = None,
-                    fromlist: tuple[str, ...] = (),
-                    level: int = 0,
-                ) -> ModuleType:
-                    with self._global_import_lock:
-                        return self._do_import(
-                            original_import, name, globals, locals, fromlist, level
-                        )
+            def custom_import(
+                name: str,
+                globals: dict[str, Any] | None = None,
+                locals: dict[str, Any] | None = None,
+                fromlist: tuple[str, ...] = (),
+                level: int = 0,
+            ) -> ModuleType:
+                with self._global_import_lock:
+                    return self._do_import(
+                        original_import, name, globals, locals, fromlist, level
+                    )
 
-                current_import = builtins.__import__
-                if current_import != custom_import:
-                    builtins.__import__ = custom_import
+            current_import = builtins.__import__
+            if current_import != custom_import:
+                builtins.__import__ = custom_import
 
-                try:
-                    yield custom_import
-                finally:
-                    if (
-                        builtins.__import__ == custom_import
-                        and self._original_import is not None
-                    ):
-                        builtins.__import__ = self._original_import
-                        self._original_import = None
+            try:
+                yield custom_import
+            finally:
+                if (
+                    builtins.__import__ == custom_import
+                    and self._original_import is not None
+                ):
+                    builtins.__import__ = self._original_import
+                    self._original_import = None
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute a merged module by combining upper and lower modules.
