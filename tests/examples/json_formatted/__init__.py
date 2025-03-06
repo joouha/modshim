@@ -20,6 +20,6 @@ def dumps(obj: dict[str, Any], *args: Any, **kwargs: Any) -> str:
     kwargs["indent"] = 2
     kwargs["sort_keys"] = True
     
-    # Get the dumps from the lower module (which will be json_single_quotes)
-    from json_formatted_quotes import dumps as lower_dumps
+    # Get the dumps from the lower module
+    from json_single_quotes import dumps as lower_dumps
     return lower_dumps(obj, *args, **kwargs)
