@@ -250,10 +250,11 @@ class MergedModuleLoader(Loader):
         # Use global lock for entire module execution
         with self._global_import_lock:
             with self.hook_imports():
-                # Re-execute lower module with our import hook active
-                log.debug("Executing '%s'", module._lower.__spec__.name)
-                module._lower.__spec__.loader.exec_module(module._lower)
-                log.debug("Executed '%s'", module._lower.__spec__.name)
+                # Re-execute lower module with our import hook active if it has a loader
+                if module._lower.__spec__ and module._lower.__spec__.loader:
+                    log.debug("Executing '%s'", module._lower.__spec__.name)
+                    module._lower.__spec__.loader.exec_module(module._lower)
+                    log.debug("Executed '%s'", module._lower.__spec__.name)
 
             # Copy attributes from lower first
             for name, value in vars(module._lower).items():
