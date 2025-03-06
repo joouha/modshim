@@ -6,7 +6,7 @@ import pytest
 from modshim import MergedModuleFinder, shim
 
 
-def test_multiple_registrations():
+def test_multiple_registrations() -> None:
     """Test behavior when registering the same module multiple times."""
     # First registration
     shim1 = shim("tests.examples.json_single_quotes", "json", "json_multiple")
@@ -30,7 +30,7 @@ def test_multiple_registrations():
     assert shim3 is not shim1
 
 
-def test_concurrent_shims():
+def test_concurrent_shims() -> None:
     """Test that multiple threads can safely create and use shims."""
 
     def create_and_use_shim(i):
@@ -62,7 +62,7 @@ def test_concurrent_shims():
         assert all(r == "{'test': 'value'}" for r in results)
 
 
-def test_concurrent_access():
+def test_concurrent_access() -> None:
     """Test that multiple threads can safely access the same shim."""
     # Create a single shim first
     merged = shim("tests.examples.json_single_quotes", "json", "json_shim_shared")
@@ -83,7 +83,7 @@ def test_concurrent_access():
         assert all(r == "{'test': 'value'}" for r in results)
 
 
-def test_nested_module_imports():
+def test_nested_module_imports() -> None:
     """Test that nested/submodule imports work correctly."""
     # Create a shim that includes submodules
     shim("tests.examples.urllib_punycode", "urllib", "urllib_nested")
@@ -98,7 +98,7 @@ def test_nested_module_imports():
     assert parse.urlparse(url).netloc == "bücher.example.com"
 
 
-def test_error_handling():
+def test_error_handling() -> None:
     """Test error cases and edge conditions."""
     # Test with invalid lower module
     with pytest.raises(ImportError):
@@ -113,7 +113,7 @@ def test_error_handling():
         shim("tests.examples.json_single_quotes", "", "json_error")
 
 
-def test_attribute_access():
+def test_attribute_access() -> None:
     """Test various attribute access patterns on shimmed modules."""
     merged = shim("tests.examples.json_single_quotes", "json", "json_attrs")
 
@@ -131,7 +131,7 @@ def test_attribute_access():
     assert "__name__" in attrs
 
 
-def test_module_reload():
+def test_module_reload() -> None:
     """Test behavior when reloading shimmed modules."""
     import importlib
     import sys
@@ -187,7 +187,7 @@ def test_module_reload():
     del sys.modules["test_merged"]
 
 
-def test_package_paths():
+def test_package_paths() -> None:
     """Test that __path__ and package attributes are handled correctly."""
     merged = shim("tests.examples.pathlib_is_empty", "pathlib", "pathlib_paths")
 
@@ -201,7 +201,7 @@ def test_package_paths():
     assert hasattr(Path, "is_empty")
 
 
-def test_import_hook_cleanup():
+def test_import_hook_cleanup() -> None:
     """Test that import hooks are properly cleaned up."""
     import gc
     import sys
@@ -233,7 +233,7 @@ def test_import_hook_cleanup():
     assert len(sys.meta_path) == initial_meta_path_count
 
 
-def test_context_preservation():
+def test_context_preservation() -> None:
     """Test that module context (__file__, __package__, etc.) is preserved."""
     merged = shim("tests.examples.json_single_quotes", "json", "json_context")
 
