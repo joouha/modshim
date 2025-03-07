@@ -388,7 +388,16 @@ def shim(upper: str, lower: str, as_name: str | None = None) -> ModuleType:
 
     Returns:
         A new module that combines both modules, with upper taking precedence
+
+    Raises:
+        ValueError: If either upper or lower module name is empty
     """
+    # Validate module names
+    if not upper:
+        raise ValueError("Upper module name cannot be empty")
+    if not lower:
+        raise ValueError("Lower module name cannot be empty")
+
     merged_name = as_name or f"{lower}_shim"
 
     log.debug(
