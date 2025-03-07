@@ -125,7 +125,9 @@ class MergedModuleLoader(Loader):
         # Create merged module
         merged = MergedModule(spec.name, upper_module, lower_module, self.finder)
         merged.__package__ = spec.parent
-        merged.__path__ = getattr(lower_module, "__path__", None)
+        path_attr = getattr(lower_module, "__path__", None)
+        if path_attr is not None:
+            merged.__path__ = list(path_attr)
 
         # Store in cache
         with self.finder._cache_lock:
@@ -195,12 +197,7 @@ class MergedModuleLoader(Loader):
         return result
 
     @contextmanager
-    def hook_imports(
-        self,
-    ) -> Callable[
-        [str, dict[str, Any] | None, dict[str, Any] | None, tuple[str, ...], int],
-        ModuleType,
-    ]:
+    def hook_imports(self) -> Iterator[Callable[[str, dict[str, Any] | None, dict[str, Any] | None, tuple[str, ...], int], ModuleType]]:
         """Temporarily install a custom import hook for handling merged modules.
 
         Thread-safe: Uses global and instance-specific locks to prevent concurrent modifications.
@@ -269,10 +266,27 @@ class MergedModuleLoader(Loader):
                     setattr(module, name, value)
 
 
+from typing import Protocol, Sequence
+
+class MetaPathFinderProtocol(Protocol):
+    """Protocol for MetaPathFinder to fix type hints."""
+    def find_spec(
+        self,
+        fullname: str,
+        path: Sequence[str] | None,
+        target: ModuleType | None = None,
+    ) -> ModuleSpec | None:
+        ...
+
 class MergedModuleFinder(MetaPathFinder):
     """Finder that creates merged modules combining upper and lower modules."""
 
     _meta_path_lock = threading.Lock()
+    merged_name: str
+    upper_name: str 
+    lower_name: str
+    cache: dict[str, ModuleType]
+    _cache_lock: threading.Lock
 
     def cleanup(self) -> None:
         """Clean up this finder and its associated modules.
@@ -329,7 +343,7 @@ class MergedModuleFinder(MetaPathFinder):
     def find_spec(
         self,
         fullname: str,
-        path: list[str] | None = None,
+        path: Sequence[str] | None = None,
         target: ModuleType | None = None,
     ) -> ModuleSpec | None:
         """Find and create a module spec for merged modules.
