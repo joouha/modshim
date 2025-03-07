@@ -47,15 +47,20 @@ class Schema:
 class DictReader(original_csv.DictReader):
     """Enhanced DictReader with schema validation."""
 
-    def __init__(self, *args: Any, schema: Schema | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        f: Any,
+        schema: Schema | None = None,
+        **kwargs: Any
+    ) -> None:
         """Initialize DictReader with optional schema validation.
 
         Args:
-            *args: Positional arguments passed to csv.DictReader
+            f: A file-like object to read from
             schema: Optional Schema instance for validation and conversion
             **kwargs: Keyword arguments passed to csv.DictReader
         """
-        super().__init__(*args, **kwargs)
+        super().__init__(f, **kwargs)
         self.schema = schema
 
     def __next__(self) -> dict[str, Any]:

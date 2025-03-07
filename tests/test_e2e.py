@@ -32,7 +32,7 @@ def test_json_metadata_override() -> None:
     shim(lower="json", upper="tests.examples.json_metadata", as_name="json_metadata")
     import json
 
-    from json_metadata import dumps
+    from json_metadata import dumps  # type: ignore [reportMissingImports]
 
     data = {"name": "test"}
     result = dumps(data)
@@ -56,7 +56,7 @@ def test_datetime_weekend_override() -> None:
     )
     from datetime import datetime
 
-    from datetime_weekend import datetime as datetime_weekend
+    from datetime_weekend import datetime as datetime_weekend  # type: ignore [reportMissingImports]
 
     # Test custom property
     dt = datetime_weekend(2024, 1, 6)  # Saturday
@@ -78,7 +78,7 @@ def test_random_fixed_seed() -> None:
     shim(lower="random", upper="tests.examples.random_fixed", as_name="random_fixed")
     import random
 
-    from random_fixed import Random
+    from random_fixed import Random  # type: ignore [reportMissingImports]
 
     # Set a fixed seed
     Random.set_fixed_seed(42)
@@ -114,7 +114,7 @@ def test_pathlib_is_empty() -> None:
     import tempfile
     from pathlib import Path
 
-    from pathlib_is_empty import Path as PathTest
+    from pathlib_is_empty import Path as PathTest  # type: ignore [reportMissingImports]
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create test files and directories
@@ -147,7 +147,7 @@ def test_time_dilation() -> None:
     shim(lower="time", upper="tests.examples.time_dilation", as_name="time_dilation")
     import time as time_original
 
-    from time_dilation import set_dilation, sleep, time
+    from time_dilation import set_dilation, sleep, time  # type: ignore [reportMissingImports]
 
     # Set time to run at 2x speed
     set_dilation(2.0)
@@ -180,7 +180,7 @@ def test_urllib_punycode_override() -> None:
         as_name="urllib_punycode",
     )
     # Test direct usage of patched urlparse
-    from urllib_punycode.parse import urlparse as test_urlparse
+    from urllib_punycode.parse import urlparse as test_urlparse  # type: ignore [reportMissingImports]
 
     url = "https://xn--bcher-kva.example.com/path"
     result = test_urlparse(url)
@@ -209,7 +209,7 @@ def test_csv_schema_override() -> None:
     from datetime import datetime
     from io import StringIO
 
-    from csv_schema import DictReader, Schema
+    from csv_schema import DictReader, Schema  # type: ignore [reportMissingImports]
 
     # Test data with mixed types
     csv_data = StringIO(

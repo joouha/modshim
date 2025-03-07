@@ -2,10 +2,16 @@
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from types import ModuleType
+from typing import Any, Callable
 
 import pytest
 
 from modshim import MergedModuleFinder, shim
+
+class TestModule(ModuleType):
+    """Test module type with proper typing."""
+    get_count: Callable[[], int]
 
 
 def test_multiple_registrations() -> None:
@@ -91,8 +97,8 @@ def test_nested_module_imports() -> None:
     shim("tests.examples.urllib_punycode", "urllib", "urllib_nested")
 
     # Try importing various submodules
-    from urllib_nested import parse
-    from urllib_nested.parse import urlparse
+    from urllib_nested import parse  # type: ignore [reportMissingImports]
+    from urllib_nested.parse import urlparse  # type: ignore [reportMissingImports]
 
     # Verify both import styles work
     url = "https://xn--bcher-kva.example.com/path"
@@ -145,7 +151,7 @@ def test_module_reload() -> None:
     lower_counter = 0
 
     # Create underlay module
-    lower = ModuleType("test_lower")
+    lower = TestModule("test_lower")
 
     def get_lower_count() -> int:
         nonlocal lower_counter
@@ -158,7 +164,7 @@ def test_module_reload() -> None:
     sys.modules["test_lower"] = lower
 
     # Create overlay module
-    upper = ModuleType("test_upper")
+    upper = TestModule("test_upper")
 
     def get_upper_count() -> int:
         nonlocal upper_counter
@@ -198,7 +204,7 @@ def test_package_paths() -> None:
     assert merged.__package__ == "pathlib_paths"
 
     # Test importing from package
-    from pathlib_paths import Path
+    from pathlib_paths import Path  # type: ignore [reportMissingImports]
 
     assert hasattr(Path, "is_empty")
 
