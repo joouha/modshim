@@ -1,4 +1,3 @@
-
 # modshim
 
 A Python library for enhancing existing modules without modifying their source code - a clean alternative to vendoring.
@@ -7,9 +6,9 @@ A Python library for enhancing existing modules without modifying their source c
 
 `modshim` allows you to overlay custom functionality onto existing Python modules while preserving their original behavior. This is particularly useful when you need to:
 
-- Add new methods or properties to built-in types
-- Modify behavior of existing functions
 - Fix bugs in third-party libraries without forking
+- Modify behavior of existing functions
+- Add new methods or properties to built-in types
 - Test alternative implementations
 
 ## Installation
@@ -37,10 +36,9 @@ print(result)  # {'hello': 'world'}
 
 ## Key Features
 
-- **Non-invasive**: Original modules remain unchanged
-- **Thread-safe**: Safe for concurrent usage
+- **Non-invasive**: Original modules remain usable and unchanged
 - **Transparent**: Enhanced modules behave like regular Python modules
-- **Composable**: Stack multiple enhancements
+- **Thread-safe**: Safe for concurrent usage
 - **Type-safe**: Fully typed with modern Python type hints
 
 ## Example Use Cases
@@ -71,6 +69,3 @@ Unlike vendoring (copying) code:
 - Cleaner separation between original and custom code
 - More maintainable and testable enhancement path
 
-## License
-
-MIT
