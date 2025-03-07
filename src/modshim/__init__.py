@@ -8,7 +8,8 @@ import sys
 import threading
 from contextlib import contextmanager
 from importlib import import_module
-from importlib.abc import Loader, MetaPathFinder
+from importlib.abc import Loader
+from typing import Iterator
 from importlib.util import find_spec, module_from_spec, spec_from_loader
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Callable
@@ -29,7 +30,7 @@ class MergedModule(ModuleType):
         name: str,
         upper_module: ModuleType,
         lower_module: ModuleType,
-        finder: MergedModuleFinder,
+        finder: "MergedModuleFinder",
     ) -> None:
         """Initialize merged module with upper and lower modules.
 
