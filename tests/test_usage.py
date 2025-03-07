@@ -1,16 +1,20 @@
 """Tests for modshim usage patterns and edge cases."""
 
+from __future__ import annotations
+
 import time
 from concurrent.futures import ThreadPoolExecutor
 from types import ModuleType
-from typing import Any, Callable
+from typing import Callable
 
 import pytest
 
 from modshim import MergedModuleFinder, shim
 
-class TestModule(ModuleType):
+
+class _TestModule(ModuleType):
     """Test module type with proper typing."""
+
     get_count: Callable[[], int]
 
 
@@ -144,14 +148,13 @@ def test_module_reload() -> None:
     import importlib
     import sys
     from importlib.machinery import ModuleSpec
-    from types import ModuleType
 
     # Create in-memory modules with counters
     upper_counter = 0
     lower_counter = 0
 
     # Create underlay module
-    lower = TestModule("test_lower")
+    lower = _TestModule("test_lower")
 
     def get_lower_count() -> int:
         nonlocal lower_counter
@@ -164,7 +167,7 @@ def test_module_reload() -> None:
     sys.modules["test_lower"] = lower
 
     # Create overlay module
-    upper = TestModule("test_upper")
+    upper = _TestModule("test_upper")
 
     def get_upper_count() -> int:
         nonlocal upper_counter

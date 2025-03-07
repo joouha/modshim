@@ -9,12 +9,12 @@ import threading
 from contextlib import contextmanager
 from importlib import import_module
 from importlib.abc import Loader
-from typing import Iterator
 from importlib.util import find_spec, module_from_spec, spec_from_loader
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
     from importlib.machinery import ModuleSpec
 
 # Set up logger with NullHandler
@@ -30,7 +30,7 @@ class MergedModule(ModuleType):
         name: str,
         upper_module: ModuleType,
         lower_module: ModuleType,
-        finder: "MergedModuleFinder",
+        finder: MergedModuleFinder,
     ) -> None:
         """Initialize merged module with upper and lower modules.
 
@@ -78,7 +78,7 @@ class MergedModuleLoader(Loader):
         merged_name: str,
         upper_name: str,
         lower_name: str,
-        finder: MetaPathFinder,
+        finder: MergedModuleFinder,
     ) -> None:
         """Initialize the loader with module names and cache.
 
@@ -198,7 +198,14 @@ class MergedModuleLoader(Loader):
         return result
 
     @contextmanager
-    def hook_imports(self) -> Iterator[Callable[[str, dict[str, Any] | None, dict[str, Any] | None, tuple[str, ...], int], ModuleType]]:
+    def hook_imports(
+        self,
+    ) -> Iterator[
+        Callable[
+            [str, dict[str, Any] | None, dict[str, Any] | None, tuple[str, ...], int],
+            ModuleType,
+        ]
+    ]:
         """Temporarily install a custom import hook for handling merged modules.
 
         Thread-safe: Uses global and instance-specific locks to prevent concurrent modifications.
@@ -267,24 +274,12 @@ class MergedModuleLoader(Loader):
                     setattr(module, name, value)
 
 
-from typing import Protocol, Sequence
-
-class MetaPathFinderProtocol(Protocol):
-    """Protocol for MetaPathFinder to fix type hints."""
-    def find_spec(
-        self,
-        fullname: str,
-        path: Sequence[str] | None,
-        target: ModuleType | None = None,
-    ) -> ModuleSpec | None:
-        ...
-
 class MergedModuleFinder:
     """Finder that creates merged modules combining upper and lower modules."""
 
     _meta_path_lock = threading.Lock()
     merged_name: str
-    upper_name: str 
+    upper_name: str
     lower_name: str
     cache: dict[str, ModuleType]
     _cache_lock: threading.Lock

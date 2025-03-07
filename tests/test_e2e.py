@@ -56,7 +56,9 @@ def test_datetime_weekend_override() -> None:
     )
     from datetime import datetime
 
-    from datetime_weekend import datetime as datetime_weekend  # type: ignore [reportMissingImports]
+    from datetime_weekend import (  # type: ignore [reportMissingImports]
+        datetime as datetime_weekend,
+    )
 
     # Test custom property
     dt = datetime_weekend(2024, 1, 6)  # Saturday
@@ -147,7 +149,11 @@ def test_time_dilation() -> None:
     shim(lower="time", upper="tests.examples.time_dilation", as_name="time_dilation")
     import time as time_original
 
-    from time_dilation import set_dilation, sleep, time  # type: ignore [reportMissingImports]
+    from time_dilation import (  # type: ignore [reportMissingImports]
+        set_dilation,
+        sleep,
+        time,
+    )
 
     # Set time to run at 2x speed
     set_dilation(2.0)
@@ -180,7 +186,9 @@ def test_urllib_punycode_override() -> None:
         as_name="urllib_punycode",
     )
     # Test direct usage of patched urlparse
-    from urllib_punycode.parse import urlparse as test_urlparse  # type: ignore [reportMissingImports]
+    from urllib_punycode.parse import (  # type: ignore [reportMissingImports]
+        urlparse as test_urlparse,
+    )
 
     url = "https://xn--bcher-kva.example.com/path"
     result = test_urlparse(url)
@@ -249,7 +257,7 @@ id,name,date,score
     csv_data.seek(0)
     # Verify original DictReader rejects schema parameter
     with pytest.raises(TypeError):
-        original_csv.DictReader(csv_data, schema=schema)
+        original_csv.DictReader(csv_data, schema=schema)  # type: ignore [reportCallIssue]
     original_reader = original_csv.DictReader(csv_data)
     original_row = next(original_reader)
     assert isinstance(original_row["id"], str)  # Still strings
