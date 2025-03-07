@@ -1,7 +1,7 @@
 [project]
 name = "modshim"
 version = "0.1.0"
-description = "Override and customize third-party packages without touching their code."
+description = "Override and customize Python packages without touching their code."
 readme = "README.md"
 authors = [
     { name = "Josiah Outram Halstead", email = "josiah@halstead.email" }
