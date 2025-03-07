@@ -15,7 +15,7 @@ def test_json_single_quotes_override() -> None:
 
     import json
 
-    import json_single_quotes as json_test
+    import json_single_quotes as json_test  # type: ignore [reportMissingImports]
 
     data = {"name": "test", "list": ["a", "b"]}
     result = json_test.dumps(data)
