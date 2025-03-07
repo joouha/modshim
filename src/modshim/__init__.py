@@ -278,7 +278,7 @@ class MetaPathFinderProtocol(Protocol):
     ) -> ModuleSpec | None:
         ...
 
-class MergedModuleFinder(MetaPathFinder):
+class MergedModuleFinder:
     """Finder that creates merged modules combining upper and lower modules."""
 
     _meta_path_lock = threading.Lock()
