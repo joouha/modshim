@@ -109,11 +109,9 @@ def test_error_handling() -> None:
     # Test with invalid module names
     with pytest.raises(ValueError, match="Upper module name cannot be empty"):
         shim("", "json", "json_error")
-    with pytest.raises(ValueError, match="Lower module name cannot be empty"):
-        shim("tests.examples.json_single_quotes", "", "json_error")
 
     # Test with empty lower module name
-    with pytest.raises(ValueError, match="Module name cannot be empty"):
+    with pytest.raises(ValueError, match="Lower module name cannot be empty"):
         shim("tests.examples.json_single_quotes", "", "json_error")
 
 
