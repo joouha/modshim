@@ -262,3 +262,76 @@ id,name,date,score
     original_row = next(original_reader)
     assert isinstance(original_row["id"], str)  # Still strings
     assert isinstance(original_row["score"], str)
+
+
+def test_self_mount_json_single_quotes() -> None:
+    """Test mounting json_single_quotes under its own name."""
+    # Mount using the upper module's own name
+    enhanced = shim(
+        lower="json",
+        upper="tests.examples.json_single_quotes",
+        mount="tests.examples.json_single_quotes"
+    )
+    
+    # Import and test using the module's own name
+    from tests.examples.json_single_quotes import dumps
+    assert dumps({"test": "value"}) == "{'test': 'value'}"
+    
+    # Verify original json is unaffected
+    import json
+    assert json.dumps({"test": "value"}) == '{"test": "value"}'
+
+
+def test_self_mount_datetime_weekend() -> None:
+    """Test mounting datetime_weekend under its own name."""
+    enhanced = shim(
+        lower="datetime",
+        upper="tests.examples.datetime_weekend",
+        mount="tests.examples.datetime_weekend"
+    )
+    
+    from tests.examples.datetime_weekend import datetime
+    dt = datetime(2024, 1, 6)  # Saturday
+    assert dt.is_weekend is True
+    
+    # Verify original datetime is unaffected
+    from datetime import datetime as original_datetime
+    assert not hasattr(original_datetime(2024, 1, 6), "is_weekend")
+
+
+def test_self_mount_pathlib_empty() -> None:
+    """Test mounting pathlib_is_empty under its own name."""
+    import tempfile
+    enhanced = shim(
+        lower="pathlib",
+        upper="tests.examples.pathlib_is_empty",
+        mount="tests.examples.pathlib_is_empty"
+    )
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        from tests.examples.pathlib_is_empty import Path
+        empty_dir = Path(tmpdir) / "empty_dir"
+        empty_dir.mkdir()
+        assert empty_dir.is_empty() is True
+        
+        # Verify original pathlib is unaffected
+        from pathlib import Path as original_path
+        assert not hasattr(original_path(tmpdir), "is_empty")
+
+
+def test_self_mount_urllib_punycode() -> None:
+    """Test mounting urllib_punycode under its own name."""
+    enhanced = shim(
+        lower="urllib",
+        upper="tests.examples.urllib_punycode",
+        mount="tests.examples.urllib_punycode"
+    )
+    
+    from tests.examples.urllib_punycode.parse import urlparse
+    url = "https://xn--bcher-kva.example.com/path"
+    result = urlparse(url)
+    assert result.netloc == "bücher.example.com"
+    
+    # Verify original urllib is unaffected
+    from urllib.parse import urlparse as original_urlparse
+    assert original_urlparse(url).netloc == "xn--bcher-kva.example.com"
