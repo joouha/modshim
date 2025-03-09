@@ -112,9 +112,12 @@ class MergedModuleLoader(Loader):
 
         # Import both modules
         try:
+            sys.meta_path.remove(self.finder)
             upper_module = import_module(self.upper_name)
         except ImportError:
             upper_module = ModuleType(self.upper_name)
+        finally:
+            sys.meta_path.insert(0, self.finder)
 
         # Create a copy of the lower module
         lower_spec = find_spec(self.lower_name)
@@ -126,7 +129,7 @@ class MergedModuleLoader(Loader):
         # Create merged module
         merged = MergedModule(spec.name, upper_module, lower_module, self.finder)
         merged.__package__ = spec.parent
-        path_attr = getattr(lower_module, "__path__", None)
+        path_attr = getattr(upper_module, "__path__", None)
         if path_attr is not None:
             merged.__path__ = list(path_attr)
 
