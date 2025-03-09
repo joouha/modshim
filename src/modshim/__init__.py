@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import logging
+import os
 import sys
 import threading
 from contextlib import contextmanager
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
 # Set up logger with NullHandler
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
+if os.getenv("MODSHIM_DEBUG"):
+    logging.basicConfig(level=logging.DEBUG)
 
 
 class MergedModule(ModuleType):
@@ -121,6 +124,7 @@ class MergedModuleLoader(Loader):
 
         # Create a copy of the lower module
         lower_spec = find_spec(self.lower_name)
+        log.debug("Using lower spec %s", lower_spec)
         if lower_spec is None:
             raise ImportError(f"No module named '{self.lower_name}'")
 
@@ -136,6 +140,7 @@ class MergedModuleLoader(Loader):
         # Store in cache
         with self.finder._cache_lock:
             self.finder.cache[spec.name] = merged
+
         return merged
 
     def _do_import(
@@ -262,9 +267,9 @@ class MergedModuleLoader(Loader):
             with self.hook_imports():
                 # Re-execute lower module with our import hook active if it has a loader
                 if module._lower.__spec__ and module._lower.__spec__.loader:
-                    log.debug("Executing '%s'", module._lower.__spec__.name)
+                    log.debug("Executing lower '%s'", module._lower.__spec__.name)
                     module._lower.__spec__.loader.exec_module(module._lower)
-                    log.debug("Executed '%s'", module._lower.__spec__.name)
+                    log.debug("Executed lower '%s'", module._lower.__spec__.name)
 
             # Copy attributes from lower first
             for name, value in vars(module._lower).items():
