@@ -396,13 +396,13 @@ class MergedModuleFinder:
         )
 
 
-def shim(upper: str, lower: str, as_name: str | None = None) -> ModuleType:
+def shim(lower: str, upper: str | None = None, mount: str | None = None) -> ModuleType:
     """Create a merged module combining upper and lower modules.
 
     Args:
-        upper: Name of the module containing overrides
         lower: Name of the target module to enhance
-        as_name: Optional name for the merged module (defaults to '{lower}_shim')
+        upper: Name of the module containing overrides
+        mount: Optional name for the merged module (defaults to '{upper}')
 
     Returns:
         A new module that combines both modules, with upper taking precedence
@@ -411,12 +411,27 @@ def shim(upper: str, lower: str, as_name: str | None = None) -> ModuleType:
         ValueError: If either upper or lower module name is empty
     """
     # Validate module names
-    if not upper:
-        raise ValueError("Upper module name cannot be empty")
     if not lower:
         raise ValueError("Lower module name cannot be empty")
 
-    merged_name = as_name or f"{lower}_shim"
+    # Use calling package name if 'upper' parameter name is empty
+    if upper is None:
+        # Get the caller's frame to find its module
+        frame = sys._getframe(1)
+        if frame is not None and frame.f_globals is not None:
+            upper = frame.f_globals.get("__package__", "")
+            if not upper:
+                upper = frame.f_globals.get("__name__", "")
+                if upper == "__main__":
+                    raise ValueError("Cannot determine package name from __main__")
+        if not upper:
+            raise ValueError("Upper module name cannot be determined")
+
+    if not upper:
+        raise ValueError("Upper module name cannot be empty")
+
+    # Use upper name as mount point if no mount point is specified
+    merged_name = mount or upper
 
     log.debug(
         "Creating merged module: '%s' with upper '%s' and lower '%s'",

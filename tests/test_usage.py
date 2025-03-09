@@ -21,12 +21,16 @@ class _TestModule(ModuleType):
 def test_multiple_registrations() -> None:
     """Test behavior when registering the same module multiple times."""
     # First registration
-    shim1 = shim("tests.examples.json_single_quotes", "json", "json_multiple")
+    shim1 = shim(
+        upper="tests.examples.json_single_quotes", lower="json", mount="json_multiple"
+    )
     result1 = shim1.dumps({"test": "value"})
     assert result1 == "{'test': 'value'}"
 
     # Second registration with same names
-    shim2 = shim("tests.examples.json_single_quotes", "json", "json_multiple")
+    shim2 = shim(
+        upper="tests.examples.json_single_quotes", lower="json", mount="json_multiple"
+    )
     result2 = shim2.dumps({"test": "value"})
     assert result2 == "{'test': 'value'}"
 
@@ -34,7 +38,11 @@ def test_multiple_registrations() -> None:
     assert shim1 is shim2
 
     # Third registration with same module but different name
-    shim3 = shim("tests.examples.json_single_quotes", "json", "json_multiple_other")
+    shim3 = shim(
+        upper="tests.examples.json_single_quotes",
+        lower="json",
+        mount="json_multiple_other",
+    )
     result3 = shim3.dumps({"test": "value"})
     assert result3 == "{'test': 'value'}"
 
@@ -49,10 +57,10 @@ def test_concurrent_shims() -> None:
         # Create unique module names for this thread
         upper = "tests.examples.json_single_quotes"
         lower = "json"
-        as_name = f"json_shim_{i}"
+        mount = f"json_shim_{i}"
 
         # Create shim
-        merged = shim(upper, lower, as_name)
+        merged = shim(upper=upper, lower=lower, mount=mount)
 
         # Use the shim to verify it works
         result = merged.dumps({"test": "value"})
@@ -77,7 +85,11 @@ def test_concurrent_shims() -> None:
 def test_concurrent_access() -> None:
     """Test that multiple threads can safely access the same shim."""
     # Create a single shim first
-    merged = shim("tests.examples.json_single_quotes", "json", "json_shim_shared")
+    merged = shim(
+        upper="tests.examples.json_single_quotes",
+        lower="json",
+        mount="json_shim_shared",
+    )
 
     def use_shim() -> str:
         result = merged.dumps({"test": "value"})
@@ -98,7 +110,7 @@ def test_concurrent_access() -> None:
 def test_nested_module_imports() -> None:
     """Test that nested/submodule imports work correctly."""
     # Create a shim that includes submodules
-    shim("tests.examples.urllib_punycode", "urllib", "urllib_nested")
+    shim(upper="tests.examples.urllib_punycode", lower="urllib", mount="urllib_nested")
 
     # Try importing various submodules
     from urllib_nested import parse  # type: ignore [reportMissingImports]
@@ -114,20 +126,26 @@ def test_error_handling() -> None:
     """Test error cases and edge conditions."""
     # Test with invalid lower module
     with pytest.raises(ImportError):
-        shim("tests.examples.json_single_quotes", "nonexistent", "json_error")
+        shim(
+            upper="tests.examples.json_single_quotes",
+            lower="nonexistent",
+            mount="json_error",
+        )
 
     # Test with invalid module names
     with pytest.raises(ValueError, match="Upper module name cannot be empty"):
-        shim("", "json", "json_error")
+        shim(upper="", lower="json", mount="json_error")
 
     # Test with empty lower module name
     with pytest.raises(ValueError, match="Lower module name cannot be empty"):
-        shim("tests.examples.json_single_quotes", "", "json_error")
+        shim(upper="tests.examples.json_single_quotes", lower="", mount="json_error")
 
 
 def test_attribute_access() -> None:
     """Test various attribute access patterns on shimmed modules."""
-    merged = shim("tests.examples.json_single_quotes", "json", "json_attrs")
+    merged = shim(
+        upper="tests.examples.json_single_quotes", lower="json", mount="json_attrs"
+    )
 
     # Test accessing non-existent attribute
     with pytest.raises(AttributeError):
@@ -180,7 +198,7 @@ def test_module_reload() -> None:
     sys.modules["test_upper"] = upper
 
     # Create merged module
-    merged = shim("test_upper", "test_lower", "test_merged")
+    merged = shim(upper="test_upper", lower="test_lower", mount="test_merged")
 
     # Initial counts should be 1
     assert merged.get_count() == 1  # Gets upper's count
@@ -200,7 +218,9 @@ def test_module_reload() -> None:
 
 def test_package_paths() -> None:
     """Test that __path__ and package attributes are handled correctly."""
-    merged = shim("tests.examples.pathlib_is_empty", "pathlib", "pathlib_paths")
+    merged = shim(
+        upper="tests.examples.pathlib_is_empty", lower="pathlib", mount="pathlib_paths"
+    )
 
     # Verify package attributes are set correctly
     assert hasattr(merged, "__path__")
@@ -222,8 +242,12 @@ def test_import_hook_cleanup() -> None:
     initial_finders = [f for f in sys.meta_path if isinstance(f, MergedModuleFinder)]
 
     # Create and remove several shims
-    shim1 = shim("tests.examples.json_single_quotes", "json", "json_cleanup1")
-    shim2 = shim("tests.examples.json_single_quotes", "json", "json_cleanup2")
+    shim1 = shim(
+        upper="tests.examples.json_single_quotes", lower="json", mount="json_cleanup1"
+    )
+    shim2 = shim(
+        upper="tests.examples.json_single_quotes", lower="json", mount="json_cleanup2"
+    )
 
     # Force cleanup explicitly rather than relying on __del__
     shim1._finder.cleanup()
@@ -246,7 +270,9 @@ def test_import_hook_cleanup() -> None:
 
 def test_context_preservation() -> None:
     """Test that module context (__file__, __package__, etc.) is preserved."""
-    merged = shim("tests.examples.json_single_quotes", "json", "json_context")
+    merged = shim(
+        upper="tests.examples.json_single_quotes", lower="json", mount="json_context"
+    )
 
     # Verify important context attributes
     assert hasattr(merged, "__file__")
