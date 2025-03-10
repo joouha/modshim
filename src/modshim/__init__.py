@@ -167,6 +167,17 @@ class MergedModuleLoader(Loader):
         caller_package = globals.get("__package__", "") if globals else ""
         caller_module = globals.get("__name__", "") if globals else ""
 
+        # Check if this is an attribute import from our merged module
+        if (
+            name == self.merged_name 
+            or name.startswith(f"{self.merged_name}.")
+        ):
+            base_module = original_import(self.merged_name, globals, locals, (), level)
+            if fromlist:
+                # Handle attribute imports by returning the base module
+                # The attribute lookup will happen via __getattr__
+                return base_module
+
         # Resolve relative imports from the lower module
         if level and (
             caller_package == self.lower_name
