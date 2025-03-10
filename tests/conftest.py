@@ -1,7 +1,7 @@
 """Common test fixtures."""
 
 import sys
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 
@@ -19,12 +19,10 @@ def cleanup_modules() -> Iterator[None]:
 
     # Remove any MergedModuleFinder instances
     sys.meta_path = [
-        finder for finder in sys.meta_path 
-        if not isinstance(finder, MergedModuleFinder)
+        finder for finder in sys.meta_path if not isinstance(finder, MergedModuleFinder)
     ]
     sys.meta_path.extend(
-        finder for finder in original_meta_path 
-        if finder not in sys.meta_path
+        finder for finder in original_meta_path if finder not in sys.meta_path
     )
 
     # Remove any modules that weren't present originally
