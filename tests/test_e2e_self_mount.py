@@ -10,7 +10,7 @@ def test_json_single_quotes_override() -> None:
     shim(
         lower="json",
         upper="tests.examples.json_single_quotes",
-        mount="json_single_quotes",
+        mount="tests.examples.json_single_quotes",
     )
 
     import json
@@ -29,7 +29,7 @@ def test_json_single_quotes_override() -> None:
 
 def test_json_metadata_override() -> None:
     """Test that json.dumps can be overridden while preserving original behavior."""
-    shim(lower="json", upper="tests.examples.json_metadata", mount="json_metadata")
+    shim(lower="json", upper="tests.examples.json_metadata", mount="tests.examples.json_metadata")
     import json
 
     from json_metadata import dumps  # type: ignore [reportMissingImports]
@@ -52,7 +52,7 @@ def test_datetime_weekend_override() -> None:
     shim(
         lower="datetime",
         upper="tests.examples.datetime_weekend",
-        mount="datetime_weekend",
+        mount="tests.examples.datetime_weekend",
     )
     from datetime import datetime
 
@@ -77,7 +77,7 @@ def test_datetime_weekend_override() -> None:
 
 def test_random_fixed_seed() -> None:
     """Test that random module can be configured with a fixed seed."""
-    shim(lower="random", upper="tests.examples.random_fixed", mount="random_fixed")
+    shim(lower="random", upper="tests.examples.random_fixed", mount="tests.examples.random_fixed")
     import random
 
     from random_fixed import Random  # type: ignore [reportMissingImports]
@@ -110,7 +110,7 @@ def test_pathlib_is_empty() -> None:
     shim(
         lower="pathlib",
         upper="tests.examples.pathlib_is_empty",
-        mount="pathlib_is_empty",
+        mount="tests.examples.pathlib_is_empty",
     )
     import pathlib
     import tempfile
@@ -146,7 +146,7 @@ def test_pathlib_is_empty() -> None:
 
 def test_time_dilation() -> None:
     """Test that time can be dilated while preserving original behavior."""
-    shim(lower="time", upper="tests.examples.time_dilation", mount="time_dilation")
+    shim(lower="time", upper="tests.examples.time_dilation", mount="tests.examples.time_dilation")
     import time as time_original
 
     from time_dilation import (  # type: ignore [reportMissingImports]
@@ -183,7 +183,7 @@ def test_urllib_punycode_override() -> None:
     shim(
         lower="urllib",
         upper="tests.examples.urllib_punycode",
-        mount="urllib_punycode",
+        mount="tests.examples.urllib_punycode",
     )
     # Test direct usage of patched urlparse
     from urllib_punycode.parse import (  # type: ignore [reportMissingImports]
@@ -212,7 +212,7 @@ def test_urllib_punycode_override() -> None:
 
 def test_csv_schema_override() -> None:
     """Test that csv module supports schema validation."""
-    shim(lower="csv", upper="tests.examples.csv_schema", mount="csv_schema")
+    shim(lower="csv", upper="tests.examples.csv_schema", mount="tests.examples.csv_schema")
     import csv as original_csv
     from datetime import datetime
     from io import StringIO
