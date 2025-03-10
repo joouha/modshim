@@ -405,7 +405,11 @@ class MergedModuleFinder:
         )
 
     def __repr__(self) -> str:
-        # AI! add the missing docstring
+        """Return string representation showing merged module relationships.
+
+        Returns:
+            String in format 'MergedModuleFinder(merged = upper -> lower)'
+        """
         return f"MergedModuleFinder({self.merged_name} = {self.upper_name} -> {self.lower_name})"
 
 
