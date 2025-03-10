@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from importlib.abc import Loader
 from importlib.machinery import ModuleSpec
 from types import ModuleType
 from typing import Callable
@@ -13,7 +14,7 @@ import pytest
 from modshim import MergedModuleFinder, shim
 
 
-class _TestModuleLoader:
+class _TestModuleLoader(Loader):
     def __init__(self, module: ModuleType) -> None:
         self.module = module
 

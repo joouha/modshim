@@ -319,7 +319,7 @@ class MergedModuleFinder:
     merged_name: str
     upper_name: str
     lower_name: str
-    cache: dict[str, ModuleType]
+    cache: dict[tuple[str, str, str], ModuleType]
     _cache_lock: threading.Lock
 
     def __init__(
