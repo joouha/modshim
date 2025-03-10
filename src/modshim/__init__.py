@@ -117,6 +117,10 @@ class MergedModuleLoader(Loader):
         try:
             sys.meta_path.remove(self.finder)
             upper_module = import_module(self.upper_name)
+            # upper_spec = find_spec(self.upper_name)
+            # if upper_spec is not None:
+            #     upper_module = module_from_spec(upper_spec)
+            # else:
         except ImportError:
             upper_module = ModuleType(self.upper_name)
         finally:
@@ -124,7 +128,7 @@ class MergedModuleLoader(Loader):
 
         # Create a copy of the lower module
         lower_spec = find_spec(self.lower_name)
-        log.debug("Using lower spec %s", lower_spec)
+        log.debug("Using lower spec %s for '%s'", lower_spec, self.lower_name)
         if lower_spec is None:
             raise ImportError(f"No module named '{self.lower_name}'")
 
@@ -265,6 +269,11 @@ class MergedModuleLoader(Loader):
         # Use global lock for entire module execution
         with self._global_import_lock:
             with self.hook_imports():
+                if module._upper.__spec__ and module._upper.__spec__.loader:
+                    log.debug("Executing upper '%s'", module._upper.__spec__.name)
+                    module._upper.__spec__.loader.exec_module(module._upper)
+                    log.debug("Executed upper '%s'", module._upper.__spec__.name)
+
                 # Re-execute lower module with our import hook active if it has a loader
                 if module._lower.__spec__ and module._lower.__spec__.loader:
                     log.debug("Executing lower '%s'", module._lower.__spec__.name)
@@ -310,8 +319,8 @@ class MergedModuleFinder:
                 modules_to_remove = [
                     name
                     for name in sys.modules
-                    if name == self.merged_name
-                    or name.startswith(f"{self.merged_name}.")
+                    if name in (self.merged_name, self.upper_name)
+                    or name.startswith((f"{self.merged_name}.", f"{self.upper_name}."))
                 ]
                 for name in modules_to_remove:
                     try:
@@ -394,6 +403,8 @@ class MergedModuleFinder:
             origin=None,
             is_package=True,  # Allow submodules
         )
+
+    # AI! Add a __repr__ method which shows the upper, lower, and merged names concisely
 
 
 def shim(lower: str, upper: str | None = None, mount: str | None = None) -> ModuleType:
