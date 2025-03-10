@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from importlib.machinery import ModuleSpec
 from types import ModuleType
 from typing import Callable
 
@@ -12,8 +13,23 @@ import pytest
 from modshim import MergedModuleFinder, shim
 
 
+class _TestModuleLoader:
+    def __init__(self, module: ModuleType) -> None:
+        self.module = module
+
+    def create_module(self, spec: ModuleSpec) -> ModuleType:
+        return self.module
+
+    def exec_module(self, module: ModuleType) -> None:
+        pass
+
+
 class _TestModule(ModuleType):
     """Test module type with proper typing."""
+
+    def __init__(self, name: str, doc: str = "") -> None:
+        super().__init__(name, doc)
+        self.__spec__ = ModuleSpec(name, _TestModuleLoader(self))
 
     get_count: Callable[[], int]
 
@@ -165,7 +181,6 @@ def test_module_reload() -> None:
     """Test behavior when reloading shimmed modules."""
     import importlib
     import sys
-    from importlib.machinery import ModuleSpec
 
     # Create in-memory modules with counters
     upper_counter = 0
@@ -180,8 +195,6 @@ def test_module_reload() -> None:
         return lower_counter
 
     lower.get_count = get_lower_count
-    # Create a spec for the lower module
-    lower.__spec__ = ModuleSpec("test_lower", None)
     sys.modules["test_lower"] = lower
 
     # Create overlay module
@@ -194,7 +207,6 @@ def test_module_reload() -> None:
 
     upper.get_count = get_upper_count
     # Create a spec for the upper module
-    upper.__spec__ = ModuleSpec("test_upper", None)
     sys.modules["test_upper"] = upper
 
     # Create merged module
@@ -234,7 +246,6 @@ def test_package_paths() -> None:
 
 def test_import_hook_cleanup() -> None:
     """Test that import hooks are properly cleaned up."""
-    import gc
     import sys
 
     # Count initial meta_path entries
@@ -258,9 +269,6 @@ def test_import_hook_cleanup() -> None:
         del sys.modules["json_cleanup1"]
     if "json_cleanup2" in sys.modules:
         del sys.modules["json_cleanup2"]
-
-    # Force garbage collection
-    gc.collect()
 
     # Verify meta_path is cleaned up
     current_finders = [f for f in sys.meta_path if isinstance(f, MergedModuleFinder)]
