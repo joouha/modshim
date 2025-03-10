@@ -15,7 +15,7 @@ def test_json_single_quotes_override() -> None:
 
     import json
 
-    import json_single_quotes as json_test  # type: ignore [reportMissingImports]
+    import tests.examples.json_single_quotes as json_test  # type: ignore [reportMissingImports]
 
     data = {"name": "test", "list": ["a", "b"]}
     result = json_test.dumps(data)
@@ -32,7 +32,7 @@ def test_json_metadata_override() -> None:
     shim(lower="json", upper="tests.examples.json_metadata", mount="tests.examples.json_metadata")
     import json
 
-    from json_metadata import dumps  # type: ignore [reportMissingImports]
+    from tests.examples.json_metadata import dumps  # type: ignore [reportMissingImports]
 
     data = {"name": "test"}
     result = dumps(data)
@@ -56,7 +56,7 @@ def test_datetime_weekend_override() -> None:
     )
     from datetime import datetime
 
-    from datetime_weekend import (  # type: ignore [reportMissingImports]
+    from tests.examples.datetime_weekend import (  # type: ignore [reportMissingImports]
         datetime as datetime_weekend,
     )
 
@@ -80,7 +80,7 @@ def test_random_fixed_seed() -> None:
     shim(lower="random", upper="tests.examples.random_fixed", mount="tests.examples.random_fixed")
     import random
 
-    from random_fixed import Random  # type: ignore [reportMissingImports]
+    from tests.examples.random_fixed import Random  # type: ignore [reportMissingImports]
 
     # Set a fixed seed
     Random.set_fixed_seed(42)
@@ -116,7 +116,7 @@ def test_pathlib_is_empty() -> None:
     import tempfile
     from pathlib import Path
 
-    from pathlib_is_empty import Path as PathTest  # type: ignore [reportMissingImports]
+    from tests.examples.pathlib_is_empty import Path as PathTest  # type: ignore [reportMissingImports]
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create test files and directories
@@ -149,7 +149,7 @@ def test_time_dilation() -> None:
     shim(lower="time", upper="tests.examples.time_dilation", mount="tests.examples.time_dilation")
     import time as time_original
 
-    from time_dilation import (  # type: ignore [reportMissingImports]
+    from tests.examples.time_dilation import (  # type: ignore [reportMissingImports]
         set_dilation,
         sleep,
         time,
@@ -186,7 +186,7 @@ def test_urllib_punycode_override() -> None:
         mount="tests.examples.urllib_punycode",
     )
     # Test direct usage of patched urlparse
-    from urllib_punycode.parse import (  # type: ignore [reportMissingImports]
+    from tests.examples.urllib_punycode.parse import (  # type: ignore [reportMissingImports]
         urlparse as test_urlparse,
     )
 
@@ -195,7 +195,7 @@ def test_urllib_punycode_override() -> None:
     assert result.netloc == "bücher.example.com"
 
     # Test that urllib.request uses our decoded version internally
-    from urllib_punycode.request import (  # type: ignore [reportMissingImports]
+    from tests.examples.urllib_punycode.request import (  # type: ignore [reportMissingImports]
         Request,
         request_host,
     )
@@ -217,7 +217,7 @@ def test_csv_schema_override() -> None:
     from datetime import datetime
     from io import StringIO
 
-    from csv_schema import DictReader, Schema  # type: ignore [reportMissingImports]
+    from tests.examples.csv_schema import DictReader, Schema  # type: ignore [reportMissingImports]
 
     # Test data with mixed types
     csv_data = StringIO(
