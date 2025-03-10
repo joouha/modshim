@@ -404,7 +404,8 @@ class MergedModuleFinder:
             is_package=True,  # Allow submodules
         )
 
-    # AI! Add a __repr__ method which shows the upper, lower, and merged names concisely
+    def __repr__(self) -> str:
+        return f"MergedModuleFinder({self.merged_name} = {self.upper_name} -> {self.lower_name})"
 
 
 def shim(lower: str, upper: str | None = None, mount: str | None = None) -> ModuleType:
