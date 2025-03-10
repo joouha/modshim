@@ -405,6 +405,7 @@ class MergedModuleFinder:
         )
 
     def __repr__(self) -> str:
+        # AI! add the missing docstring
         return f"MergedModuleFinder({self.merged_name} = {self.upper_name} -> {self.lower_name})"
 
 
