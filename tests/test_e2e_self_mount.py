@@ -29,10 +29,16 @@ def test_json_single_quotes_override() -> None:
 
 def test_json_metadata_override() -> None:
     """Test that json.dumps can be overridden while preserving original behavior."""
-    shim(lower="json", upper="tests.examples.json_metadata", mount="tests.examples.json_metadata")
+    shim(
+        lower="json",
+        upper="tests.examples.json_metadata",
+        mount="tests.examples.json_metadata",
+    )
     import json
 
-    from tests.examples.json_metadata import dumps  # type: ignore [reportMissingImports]
+    from tests.examples.json_metadata import (  # type: ignore [reportMissingImports]
+        dumps,
+    )
 
     data = {"name": "test"}
     result = dumps(data)
@@ -77,10 +83,16 @@ def test_datetime_weekend_override() -> None:
 
 def test_random_fixed_seed() -> None:
     """Test that random module can be configured with a fixed seed."""
-    shim(lower="random", upper="tests.examples.random_fixed", mount="tests.examples.random_fixed")
+    shim(
+        lower="random",
+        upper="tests.examples.random_fixed",
+        mount="tests.examples.random_fixed",
+    )
     import random
 
-    from tests.examples.random_fixed import Random  # type: ignore [reportMissingImports]
+    from tests.examples.random_fixed import (
+        Random,  # type: ignore [reportMissingImports]
+    )
 
     # Set a fixed seed
     Random.set_fixed_seed(42)
@@ -116,7 +128,9 @@ def test_pathlib_is_empty() -> None:
     import tempfile
     from pathlib import Path
 
-    from tests.examples.pathlib_is_empty import Path as PathTest  # type: ignore [reportMissingImports]
+    from tests.examples.pathlib_is_empty import (
+        Path as PathTest,  # type: ignore [reportMissingImports]
+    )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create test files and directories
@@ -146,7 +160,11 @@ def test_pathlib_is_empty() -> None:
 
 def test_time_dilation() -> None:
     """Test that time can be dilated while preserving original behavior."""
-    shim(lower="time", upper="tests.examples.time_dilation", mount="tests.examples.time_dilation")
+    shim(
+        lower="time",
+        upper="tests.examples.time_dilation",
+        mount="tests.examples.time_dilation",
+    )
     import time as time_original
 
     from tests.examples.time_dilation import (  # type: ignore [reportMissingImports]
@@ -212,12 +230,19 @@ def test_urllib_punycode_override() -> None:
 
 def test_csv_schema_override() -> None:
     """Test that csv module supports schema validation."""
-    shim(lower="csv", upper="tests.examples.csv_schema", mount="tests.examples.csv_schema")
+    shim(
+        lower="csv",
+        upper="tests.examples.csv_schema",
+        mount="tests.examples.csv_schema",
+    )
     import csv as original_csv
     from datetime import datetime
     from io import StringIO
 
-    from tests.examples.csv_schema import DictReader, Schema  # type: ignore [reportMissingImports]
+    from tests.examples.csv_schema import (  # type: ignore [reportMissingImports]
+        DictReader,
+        Schema,
+    )
 
     # Test data with mixed types
     csv_data = StringIO(
