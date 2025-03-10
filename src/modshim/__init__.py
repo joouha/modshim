@@ -319,7 +319,6 @@ class MergedModuleFinder:
     merged_name: str
     upper_name: str
     lower_name: str
-    cache: dict[tuple[str, str, str], ModuleType]
     _cache_lock: threading.Lock
 
     def __init__(
@@ -338,7 +337,7 @@ class MergedModuleFinder:
         self.merged_name = merged_name
         self.upper_name = upper_name
         self.lower_name = lower_name
-        self.cache: dict[str, ModuleType] = {}
+        self.cache: dict[tuple[str, str, str], ModuleType] = {}
         self._cache_lock = threading.Lock()
 
     def find_spec(
