@@ -20,18 +20,33 @@ pip install modshim
 ## Usage
 
 ```python
-from modshim import shim
+# my_datetime_ext.py
+from datetime import datetime as OriginalDateTime
+
+
+class datetime(OriginalDateTime):
+    """Enhanced datetime class with weekend detection."""
+
+    @property
+    def is_weekend(self) -> bool:
+        """Return True if the date falls on a weekend (Saturday or Sunday)."""
+        return self.weekday() >= 5
+```
+
+```python
+>>> from modshim import shim
 
 # Create an enhanced version of the json module that uses single quotes
-json_single = shim(
-    upper="my_json_mods",     # Module with your modifications
-    lower="json",             # Original module to enhance
-    as_name="json_single"     # Name for the merged result
-)
+>>> shim(
+...     upper="my_datetime_ext",  # Module with your modifications
+...     lower="datetime",         # Original module to enhance
+...     mount="datetime_mod",     # Name for the merged result
+... )
 
-# Use it like the original, but with your enhancements
-result = json_single.dumps({"hello": "world"})
-print(result)  # {'hello': 'world'}
+# Use it like the original, but with your enhancements available
+>>> from datetime_mod import datetime
+>> datetime(2024, 1, 6).is_weekend
+True
 ```
 
 ## Key Features
@@ -59,6 +74,35 @@ url = shim("my_urllib_ext", "urllib").parse.urlparse(
     "https://xn--bcher-kva.example.com"
 )
 print(url.netloc)  # "bücher.example.com"
+```
+
+## Creating Enhancement Packages                                                      
+
+Enhancement packages can automatically apply their modifications when imported, meaning they can be imported and used without the need to manually set up the shim.                                                                             
+
+```python
+# datetime_mod.py
+from datetime import datetime as OriginalDateTime
+
+from modshim import shim
+
+class datetime(OriginalDateTime):
+    """Enhanced datetime class with weekend detection."""
+
+    @property
+    def is_weekend(self) -> bool:
+        """Return True if the date falls on a weekend (Saturday or Sunday)."""
+        return self.weekday() >= 5
+
+# `upper` defaults to the calling module
+# `mount` defaults to f`{upper}`
+shim(lower="datetime")
+```
+
+```python
+>>> from datetime_mod import datetime
+>> datetime(2024, 1, 6).is_weekend
+True
 ```
 
 ## Why Not Vendor?
