@@ -184,22 +184,17 @@ class MergedModuleLoader(Loader):
             level = 0
 
         # Check if we're in the lower module importing from within the lower module
-        if (
+        replace = (
             caller_package == self.finder.lower_name
             or caller_module.startswith(self.finder.lower_name + ".")
         ) and (
             name == self.finder.lower_name
             or name.startswith(self.finder.lower_name + ".")
-        ):
+        )
+
+        if replace:
             name = name.replace(self.finder.lower_name, self.finder.merged_name, 1)
             log.debug("Redirecting import '%s' to '%s'", original_name, name)
-
-        # Handle dotted imports without fromlist by splitting into components
-        if "." in name and not fromlist:
-            parts = name.split(".")
-            fromlist = tuple(parts[1:])
-            name = parts[0]
-            log.debug("Split dotted import into name='%s' fromlist=%r", name, fromlist)
 
         result = original_import(name, globals, locals, fromlist, level)
 
@@ -209,19 +204,25 @@ class MergedModuleLoader(Loader):
             if globals is not None:
                 globals[local_name] = result
 
-        # For dotted imports, traverse to the requested submodule
-        if fromlist:
-            current = result
-            for part in fromlist:
-                try:
-                    current = getattr(current, part)
-                except AttributeError:
-                    break
-            result = current
+        # If our mount point is a more deeply nested submodule than the lower module,
+        # we need to traverse the additional nesting levels of the import result
+        if replace:
+            lower_name_parts = self.finder.lower_name.split(".")
+            merged_name_parts = self.finder.merged_name.split(".")
+            if extra_parts := merged_name_parts[
+                1 : len(merged_name_parts) - len(lower_name_parts) + 1
+            ]:
+                current = result
+                for part in extra_parts:
+                    try:
+                        current = getattr(current, part)
+                    except AttributeError:
+                        break
+                result = current
 
         log.debug(
             "Import hook returning module '%s' for import of '%s' (fromlist=%r, level=%r) by '%s'",
-            result.__name__,
+            result,
             original_name,
             fromlist,
             level,
