@@ -110,21 +110,24 @@ class MergedModuleLoader(Loader):
         log.debug("Creating module for spec: %r", spec)
         # If already merged, return from cache
         with self.finder._cache_lock:
-            if spec.name in self.finder.cache:
-                return self.finder.cache[spec.name]
+            key = self.upper_name, self.lower_name, self.merged_name
+            if key in self.finder.cache:
+                return self.finder.cache[key]
 
-        # Import both modules
+        # Import upper module
         try:
-            sys.meta_path.remove(self.finder)
-            upper_module = import_module(self.upper_name)
-            # upper_spec = find_spec(self.upper_name)
-            # if upper_spec is not None:
-            #     upper_module = module_from_spec(upper_spec)
-            # else:
-        except ImportError:
-            upper_module = ModuleType(self.upper_name)
+            with MergedModuleFinder._meta_path_lock:
+                sys.meta_path.remove(self.finder)
+            # upper_module = import_module(self.upper_name)
+            upper_spec = find_spec(self.upper_name)
+            if upper_spec is not None:
+                upper_module = module_from_spec(upper_spec)
+            else:
+                # except ImportError:
+                upper_module = ModuleType(self.upper_name)
         finally:
-            sys.meta_path.insert(0, self.finder)
+            with MergedModuleFinder._meta_path_lock:
+                sys.meta_path.insert(0, self.finder)
 
         # Create a copy of the lower module
         lower_spec = find_spec(self.lower_name)
@@ -143,7 +146,7 @@ class MergedModuleLoader(Loader):
 
         # Store in cache
         with self.finder._cache_lock:
-            self.finder.cache[spec.name] = merged
+            self.finder.cache[key] = merged
 
         return merged
 
@@ -301,39 +304,6 @@ class MergedModuleFinder:
     cache: dict[str, ModuleType]
     _cache_lock: threading.Lock
 
-    def cleanup(self) -> None:
-        """Clean up this finder and its associated modules.
-
-        Removes the finder from sys.meta_path, clears its cache,
-        and removes associated modules from sys.modules.
-        """
-        try:
-            # Remove finder from sys.meta_path if it's still there
-            with self._meta_path_lock:
-                if self in sys.meta_path:
-                    sys.meta_path.remove(self)
-                    self.cache.clear()
-
-                # Remove all associated modules from sys.modules
-                # This includes both the main module and any submodules
-                modules_to_remove = [
-                    name
-                    for name in sys.modules
-                    if name in (self.merged_name, self.upper_name)
-                    or name.startswith((f"{self.merged_name}.", f"{self.upper_name}."))
-                ]
-                for name in modules_to_remove:
-                    try:
-                        del sys.modules[name]
-                    except KeyError:
-                        # Module already removed
-                        pass
-
-        except (ImportError, AttributeError):
-            # Only catch specific errors that might occur during shutdown
-            if not sys.is_finalizing():
-                raise
-
     def __init__(
         self,
         merged_name: str,
@@ -404,13 +374,46 @@ class MergedModuleFinder:
             is_package=True,  # Allow submodules
         )
 
+    def cleanup(self) -> None:
+        """Clean up this finder and its associated modules.
+
+        Removes the finder from sys.meta_path, clears its cache,
+        and removes associated modules from sys.modules.
+        """
+        try:
+            # Remove finder from sys.meta_path if it's still there
+            with self._meta_path_lock:
+                if self in sys.meta_path:
+                    sys.meta_path.remove(self)
+                    self.cache.clear()
+
+                # Remove all associated modules from sys.modules
+                # This includes both the main module and any submodules
+                modules_to_remove = [
+                    name
+                    for name in sys.modules
+                    if name in self.merged_name
+                    or name.startswith(f"{self.merged_name}.")
+                ]
+                for name in modules_to_remove:
+                    try:
+                        del sys.modules[name]
+                    except KeyError:
+                        # Module already removed
+                        pass
+
+        except (ImportError, AttributeError):
+            # Only catch specific errors that might occur during shutdown
+            if not sys.is_finalizing():
+                raise
+
     def __repr__(self) -> str:
         """Return string representation showing merged module relationships.
 
         Returns:
             String in format 'MergedModuleFinder(merged = upper -> lower)'
         """
-        return f"MergedModuleFinder({self.merged_name} = {self.upper_name} -> {self.lower_name})"
+        return f"MergedModuleFinder({self.lower_name} + {self.upper_name} → {self.merged_name})"
 
 
 def shim(lower: str, upper: str | None = None, mount: str | None = None) -> ModuleType:
