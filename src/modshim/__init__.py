@@ -118,14 +118,14 @@ class MergedModuleLoader(Loader):
         try:
             with MergedModuleFinder._meta_path_lock:
                 sys.meta_path.remove(self.finder)
-            # upper_module = import_module(self.upper_name)
-            upper_spec = find_spec(self.upper_name)
-            if upper_spec is not None:
-                upper_module = module_from_spec(upper_spec)
-            else:
-                # except ImportError:
+            try:
+                # Upper module gets executed at this point if it not already imported
+                upper_module = import_module(self.upper_name)
+            except ImportError:
+                # If it does not exist, we use an empty module as the upper
                 upper_module = ModuleType(self.upper_name)
         finally:
+            # Restore the finder
             with MergedModuleFinder._meta_path_lock:
                 sys.meta_path.insert(0, self.finder)
 
@@ -290,11 +290,6 @@ class MergedModuleLoader(Loader):
         # Use global lock for entire module execution
         with self._global_import_lock:
             with self.hook_imports():
-                if module._upper.__spec__ and module._upper.__spec__.loader:
-                    log.debug("Executing upper '%s'", module._upper.__spec__.name)
-                    module._upper.__spec__.loader.exec_module(module._upper)
-                    log.debug("Executed upper '%s'", module._upper.__spec__.name)
-
                 # Re-execute lower module with our import hook active if it has a loader
                 if module._lower.__spec__ and module._lower.__spec__.loader:
                     log.debug("Executing lower '%s'", module._lower.__spec__.name)
@@ -470,6 +465,14 @@ def shim(lower: str, upper: str | None = None, mount: str | None = None) -> Modu
     # Use upper name as mount point if no mount point is specified
     merged_name = mount or upper
 
+    # Check if the merged module already exists in sys.modules to avoid creating a new
+    # instance
+    if merged_name in sys.modules:
+        merged_module = sys.modules[merged_name]
+        if isinstance(merged_module, MergedModule):
+            log.debug("Merged module already exists")
+            return merged_module
+
     log.debug(
         "Creating merged module: '%s' with upper '%s' and lower '%s'",
         merged_name,
@@ -488,8 +491,14 @@ def shim(lower: str, upper: str | None = None, mount: str | None = None) -> Modu
         ]
         sys.meta_path.insert(0, finder)
 
-    # Import the merged module
+    # Create the merged module
     merged_module = import_module(merged_name)
+    merged_spec = finder.find_spec(merged_name)
+    merged_module = merged_spec.loader.create_module(merged_spec)
+    # Execute the new merged module
+    # If the upper is the mount point, it will not be re-executed as the cached module
+    # in sys.modules will be used
+    merged_spec.loader.exec_module(merged_module)
 
     with MergedModuleFinder._meta_path_lock:
         sys.modules[merged_name] = merged_module
