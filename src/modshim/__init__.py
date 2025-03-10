@@ -194,6 +194,13 @@ class MergedModuleLoader(Loader):
             name = name.replace(self.finder.lower_name, self.finder.merged_name, 1)
             log.debug("Redirecting import '%s' to '%s'", original_name, name)
 
+        # Handle dotted imports without fromlist by splitting into components
+        if "." in name and not fromlist:
+            parts = name.split(".")
+            fromlist = tuple(parts[1:])
+            name = parts[0]
+            log.debug("Split dotted import into name='%s' fromlist=%r", name, fromlist)
+
         result = original_import(name, globals, locals, fromlist, level)
 
         # For relative imports, add the module to the caller's namespace
@@ -201,6 +208,16 @@ class MergedModuleLoader(Loader):
             local_name = name.split(".")[-1]
             if globals is not None:
                 globals[local_name] = result
+
+        # For dotted imports, traverse to the requested submodule
+        if fromlist:
+            current = result
+            for part in fromlist:
+                try:
+                    current = getattr(current, part)
+                except AttributeError:
+                    break
+            result = current
 
         log.debug(
             "Import hook returning module '%s' for import of '%s' (fromlist=%r, level=%r) by '%s'",
