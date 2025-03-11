@@ -495,14 +495,18 @@ def shim(lower: str, upper: str | None = None, mount: str | None = None) -> Modu
 
     # Create the merged module
     merged_module = import_module(merged_name)
-    merged_spec = finder.find_spec(merged_name)
-    merged_module = merged_spec.loader.create_module(merged_spec)
-    # Execute the new merged module
-    # If the upper is the mount point, it will not be re-executed as the cached module
-    # in sys.modules will be used
-    merged_spec.loader.exec_module(merged_module)
+    if (
+        (merged_spec := finder.find_spec(merged_name))
+        and (loader := merged_spec.loader)
+        and (merged_module := loader.create_module(merged_spec))
+    ):
+        # Execute the new merged module
+        # If the upper is the mount point, it will not be re-executed as the cached
+        # module in sys.modules will be used
+        loader.exec_module(merged_module)
 
-    with MergedModuleFinder._meta_path_lock:
-        sys.modules[merged_name] = merged_module
+        with MergedModuleFinder._meta_path_lock:
+            sys.modules[merged_name] = merged_module
 
+    assert merged_module is not None
     return merged_module
