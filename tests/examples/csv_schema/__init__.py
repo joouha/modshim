@@ -47,12 +47,7 @@ class Schema:
 class DictReader(original_csv.DictReader):
     """Enhanced DictReader with schema validation."""
 
-    def __init__(
-        self,
-        f: Any,
-        schema: Schema | None = None,
-        **kwargs: Any
-    ) -> None:
+    def __init__(self, f: Any, schema: Schema | None = None, **kwargs: Any) -> None:
         """Initialize DictReader with optional schema validation.
 
         Args:

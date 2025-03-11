@@ -76,9 +76,9 @@ url = shim("my_urllib_ext", "urllib").parse.urlparse(
 print(url.netloc)  # "bücher.example.com"
 ```
 
-## Creating Enhancement Packages                                                      
+## Creating Enhancement Packages
 
-Enhancement packages can automatically apply their modifications when imported, meaning they can be imported and used without the need to manually set up the shim.                                                                             
+Enhancement packages can automatically apply their modifications when imported, meaning they can be imported and used without the need to manually set up the shim.
 
 ```python
 # datetime_mod.py
@@ -112,4 +112,3 @@ Unlike vendoring (copying) code:
 - Easier updates when upstream changes
 - Cleaner separation between original and custom code
 - More maintainable and testable enhancement path
-
