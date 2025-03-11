@@ -19,11 +19,20 @@ pip install modshim
 
 ## Usage
 
+Suppose we want to add a `is_weekend` property to `datetime` objects.
+
+First create a Python module containing your modifications, following the same module layout as the builtin `datetime` module:
+
 ```python
 # my_datetime_ext.py
+
+# You can import from the target module in your overlay
 from datetime import datetime as OriginalDateTime
 
+# Objects can be override by simply declaring new version with the same name
+MAX_YEAR = 3_000
 
+# Sub-classes can be used to override and extend functionality
 class datetime(OriginalDateTime):
     """Enhanced datetime class with weekend detection."""
 
@@ -33,48 +42,38 @@ class datetime(OriginalDateTime):
         return self.weekday() >= 5
 ```
 
+Then use modshim to mount your modification on top of the builtin `datetime` package under a new namespace:
+
 ```python
 >>> from modshim import shim
-
-# Create an enhanced version of the json module that uses single quotes
 >>> shim(
 ...     upper="my_datetime_ext",  # Module with your modifications
 ...     lower="datetime",         # Original module to enhance
 ...     mount="datetime_mod",     # Name for the merged result
 ... )
+```
 
-# Use it like the original, but with your enhancements available
->>> from datetime_mod import datetime
+We can then import and use the new `datetime_mod` instead of the built in `datetime`, and our modifications will be automatically applied and integrated:
+
+```python
+>>> from datetime_mod import MAX_YEAR, datetime
+>> MAX_YEAR
+3000
 >> datetime(2024, 1, 6).is_weekend
 True
 ```
 
-## Key Features
+## How It Works
 
-- **Non-invasive**: Original modules remain usable and unchanged
-- **Transparent**: Enhanced modules behave like regular Python modules
-- **Thread-safe**: Safe for concurrent usage
-- **Type-safe**: Fully typed with modern Python type hints
+`modshim` creates virtual merged modules by intercepting Python's import system. When a shimmed module is imported, modshim combines the original module with your enhancements, making your modifications appear as if they were part of the original module while preserving all existing functionality.
 
-## Example Use Cases
+At its core, modshim works by installing a custom import finder into Python's import machinery. When you call `shim()`, it creates a finder that watches for imports of your specified merged module name. When that module is imported, the finder loads both the original module and your enhancement module, then creates a new virtual module that combines them.
 
-```python
-# Add weekend detection to datetime
-dt = shim("my_datetime_ext", "datetime").datetime(2024, 1, 6)
-print(dt.is_weekend)  # True
+The merging process gives priority to your enhancements - any attributes you define (functions, classes, constants, etc.) override the originals, while all other attributes from the original module remain unchanged. This merged view is completely transparent to code using the module - it behaves exactly like a normal Python module.
 
-# Add schema validation to CSV parsing
-reader = shim("my_csv_ext", "csv").DictReader(
-    file,
-    schema={"id": int, "name": str}
-)
+Importantly, modshim automatically handles sub-modules recursively. If the original module has sub-modules (like `json.encoder`), modshim will create corresponding merged versions of those sub-modules too. This ensures that imports within the original module continue to work correctly, maintaining consistency throughout the module hierarchy.
 
-# Add automatic punycode decoding to urllib
-url = shim("my_urllib_ext", "urllib").parse.urlparse(
-    "https://xn--bcher-kva.example.com"
-)
-print(url.netloc)  # "bücher.example.com"
-```
+The system is thread-safe and handles complex scenarios like relative imports and module reloading. All of this happens without modifying any source code - the original modules remain untouched on disk, making modshim a clean alternative to vendoring code.
 
 ## Creating Enhancement Packages
 
