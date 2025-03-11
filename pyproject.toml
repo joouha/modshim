@@ -1,6 +1,6 @@
 [project]
 name = "modshim"
-version = "0.1.0"
+version = "0.2.0"
 description = "Override and customize Python packages without touching their code."
 readme = "README.md"
 authors = [
