@@ -77,7 +77,11 @@ The system is thread-safe and handles complex scenarios like relative imports an
 
 ## Creating Enhancement Packages
 
-Enhancement packages can automatically apply their modifications when imported, meaning they can be imported and used without the need to manually set up the shim.
+It is possible to use modshim to create packages which automatically replace themselves with a shimmed version of their target.
+
+This is possible because the name of the overlay package as the mount point for the merged module, and it is possible to automatically apply the shim when a module is imported. The result of this is an enhancement package which can be imported and used without the need to manually set up the shim.
+
+To use our `datetime` example from above, if we create a new module called `datetime_mod.py` as follows:
 
 ```python
 # datetime_mod.py
@@ -93,14 +97,17 @@ class datetime(OriginalDateTime):
         """Return True if the date falls on a weekend (Saturday or Sunday)."""
         return self.weekday() >= 5
 
-# `upper` defaults to the calling module
-# `mount` defaults to f`{upper}`
+# Apply the shim at import time
 shim(lower="datetime")
+# - The `upper` parameter defaults to the calling module, so will be `datetime_mod`
+# - The `mount` parameter defaults to f`{upper}`, so will be `datetime_mod`
 ```
+
+We can then import this module and use the modifications
 
 ```python
 >>> from datetime_mod import datetime
->> datetime(2024, 1, 6).is_weekend
+>> datetime(9999, 1, 6).is_weekend
 True
 ```
 
