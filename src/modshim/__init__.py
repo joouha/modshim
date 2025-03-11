@@ -24,6 +24,9 @@ log.addHandler(logging.NullHandler())
 if os.getenv("MODSHIM_DEBUG"):
     logging.basicConfig(level=logging.DEBUG)
 
+# Module-level storage for original import
+_original_import = builtins.__import__
+
 
 class MergedModule(ModuleType):
     """A module that combines attributes from upper and lower modules."""
@@ -96,7 +99,6 @@ class MergedModuleLoader(Loader):
         self.upper_name = upper_name
         self.lower_name = lower_name
         self.finder = finder
-        self._original_import = None
 
     def create_module(self, spec: ModuleSpec) -> ModuleType:
         """Create a new merged module instance.
@@ -118,12 +120,18 @@ class MergedModuleLoader(Loader):
         try:
             with MergedModuleFinder._meta_path_lock:
                 sys.meta_path.remove(self.finder)
+            current_import = builtins.__import__
             try:
+                # Restore original built-in import function in case it is hooked
+                builtins.__import__ = _original_import
                 # Upper module gets executed at this point if it not already imported
                 upper_module = import_module(self.upper_name)
             except ImportError:
                 # If it does not exist, we use an empty module as the upper
                 upper_module = ModuleType(self.upper_name)
+            finally:
+                # Restore potentially hooked import function
+                builtins.__import__ = current_import
         finally:
             # Restore the finder
             with MergedModuleFinder._meta_path_lock:
@@ -152,7 +160,6 @@ class MergedModuleLoader(Loader):
 
     def _do_import(
         self,
-        original_import: Callable,
         name: str,
         globals: dict[str, Any] | None,
         locals: dict[str, Any] | None,
@@ -161,6 +168,7 @@ class MergedModuleLoader(Loader):
     ) -> ModuleType:
         """Perform the actual import operation."""
         log.debug("Importing: %s (fromlist=%r, level=%r)", name, fromlist, level)
+
         original_name = name
         original_level = level
         # Get calling module name
@@ -196,7 +204,8 @@ class MergedModuleLoader(Loader):
             name = name.replace(self.finder.lower_name, self.finder.merged_name, 1)
             log.debug("Redirecting import '%s' to '%s'", original_name, name)
 
-        result = original_import(name, globals, locals, fromlist, level)
+        # Perform the import using the original builtin import function
+        result = _original_import(name, globals, locals, fromlist, level)
 
         # For relative imports, add the module to the caller's namespace
         if original_name and original_level:
@@ -247,10 +256,7 @@ class MergedModuleLoader(Loader):
             The custom import function that was temporarily installed.
         """
         with self._global_import_lock:
-            if self._original_import is None:
-                self._original_import = builtins.__import__
-
-            original_import = self._original_import
+            current_import = builtins.__import__
 
             def custom_import(
                 name: str,
@@ -260,9 +266,7 @@ class MergedModuleLoader(Loader):
                 level: int = 0,
             ) -> ModuleType:
                 with self._global_import_lock:
-                    return self._do_import(
-                        original_import, name, globals, locals, fromlist, level
-                    )
+                    return self._do_import(name, globals, locals, fromlist, level)
 
             # Set import hook atomically within the lock
             builtins.__import__ = custom_import
@@ -270,9 +274,7 @@ class MergedModuleLoader(Loader):
             try:
                 yield custom_import
             finally:
-                if self._original_import is not None:
-                    builtins.__import__ = self._original_import
-                    self._original_import = None
+                builtins.__import__ = current_import
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute a merged module by combining upper and lower modules.
