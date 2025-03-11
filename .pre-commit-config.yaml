@@ -1,45 +1,76 @@
 repos:
-    -   repo: https://github.com/pre-commit/pre-commit-hooks
-        rev: v4.4.0
-        hooks:
-        -   id: trailing-whitespace
-        -   id: end-of-file-fixer
-        -   id: check-yaml
-        -   id: check-added-large-files
-        -   id: check-ast
-        -   id: check-toml
-        -   id: debug-statements
-
     -   repo: local
         hooks:
+        -   id: trailing-whitespace
+            name: trailing-whitespace
+            entry: uv run trailing-whitespace-fixer
+            language: system
+            types: [text]
+
+        -   id: end-of-file-fixer
+            name: end-of-file-fixer
+            entry: uv run end-of-file-fixer
+            language: system
+            types: [text]
+
+        -   id: check-yaml
+            name: check-yaml
+            entry: uv run check-yaml
+            language: system
+            types: [yaml]
+
+        -   id: check-added-large-files
+            name: check-added-large-files
+            entry: uv run check-added-large-files
+            language: system
+            types: [text]
+
+        -   id: check-ast
+            name: check-ast
+            entry: uv run check-ast
+            language: system
+            types: [python]
+
+        -   id: check-toml
+            name: check-toml
+            entry: uv run check-toml
+            language: system
+            types: [toml]
+
+        -   id: debug-statements
+            name: debug-statements
+            entry: uv run debug-statement-hook
+            language: system
+            types: [python]
+
         -   id: ruff
             name: ruff check
-            entry: ruff check --fix --exit-non-zero-on-fix
+            entry: uv run ruff check --fix --exit-non-zero-on-fix
             language: system
             types: [python]
 
         -   id: ruff-format
             name: ruff format
-            entry: ruff format
+            entry: uv run ruff format
             language: system
             types: [python]
 
         -   id: pyright
             name: pyright
-            entry: pyright
+            entry: uv run pyright
             language: system
             types: [python]
             pass_filenames: false
 
         -   id: pytest
             name: pytest
-            entry: pytest
+            entry: uv run pytest
             language: system
             types: [python]
             pass_filenames: false
 
         -   id: codespell
             name: codespell
-            entry: codespell
+            entry: uv run codespell
             language: system
             types: [text]
