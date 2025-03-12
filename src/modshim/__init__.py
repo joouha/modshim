@@ -41,7 +41,12 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
         A wrapped version of the object with the same type but modified globals
     """
     if isinstance(obj, (FunctionType, MethodType)):
-        # Handle functions and methods directly
+        # For bound methods, wrap the underlying function
+        if isinstance(obj, MethodType):
+            wrapped_func = wrap_globals(obj.__func__, new_globals)
+            return cast(T, MethodType(wrapped_func, obj.__self__))
+            
+        # Handle regular functions
         wrapped = FunctionType(
             obj.__code__,
             new_globals,
@@ -72,11 +77,6 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
 
                 # For instance attributes
                 if isinstance(attr, (FunctionType, MethodType)):
-                    # Wrap the underlying function of instance methods
-                    if hasattr(attr, '__func__'):
-                        wrapped_func = wrap_globals(attr.__func__, new_globals)
-                        # Bind the wrapped function to this instance
-                        return MethodType(wrapped_func, self)
                     return wrap_globals(attr, new_globals)
 
                 return attr
@@ -87,6 +87,10 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
     if isinstance(obj, type):
         # For classes, we need to create a new type
         wrapped = Wrapped(obj.__name__, obj.__bases__, dict(obj.__dict__))
+        # Also wrap any methods defined on the class
+        for name, attr in vars(wrapped).items():
+            if isinstance(attr, (FunctionType, MethodType)):
+                setattr(wrapped, name, wrap_globals(attr, new_globals))
     else:
         # For regular instances
         wrapped = Wrapped.__new__(Wrapped)
