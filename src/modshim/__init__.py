@@ -63,8 +63,20 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
                 # Get attribute from original object
                 attr = super().__getattribute__(name)
 
-                # Wrap functions/methods to use new globals
+                # For class attributes
+                if isinstance(self, type):
+                    # Wrap class methods and static methods
+                    if isinstance(attr, (FunctionType, MethodType)):
+                        return wrap_globals(attr, new_globals)
+                    return attr
+
+                # For instance attributes
                 if isinstance(attr, (FunctionType, MethodType)):
+                    # Wrap the underlying function of instance methods
+                    if hasattr(attr, '__func__'):
+                        wrapped_func = wrap_globals(attr.__func__, new_globals)
+                        # Bind the wrapped function to this instance
+                        return MethodType(wrapped_func, self)
                     return wrap_globals(attr, new_globals)
 
                 return attr
@@ -78,6 +90,8 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
     else:
         # For regular instances
         wrapped = Wrapped.__new__(Wrapped)
+        if hasattr(obj, "__dict__"):
+            wrapped.__dict__.update(obj.__dict__)
 
     return cast(T, wrapped)
 
