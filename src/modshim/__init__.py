@@ -12,11 +12,13 @@ from importlib import import_module
 from importlib.abc import Loader
 from importlib.util import find_spec, module_from_spec, spec_from_loader
 from types import FunctionType, MethodType, ModuleType
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Dict, TypeVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from importlib.machinery import ModuleSpec
+
+T = TypeVar('T')
 
 # Set up logger with NullHandler
 log = logging.getLogger(__name__)
@@ -28,41 +30,55 @@ if os.getenv("MODSHIM_DEBUG"):
 _original_import = builtins.__import__
 
 
-class GlobalsWrapper:
-    """Wrapper that replaces an object's __globals__ dictionary."""
+def wrap_globals(obj: T, new_globals: Dict[str, Any]) -> T:
+    """Create a wrapper that replaces an object's __globals__ while preserving its type.
+    
+    Args:
+        obj: Object to wrap
+        new_globals: New globals dictionary to use
+        
+    Returns:
+        A wrapped version of the object with the same type but modified globals
+    """
+    if isinstance(obj, (FunctionType, MethodType)):
+        # Handle functions and methods directly
+        wrapped = FunctionType(
+            obj.__code__,
+            new_globals,
+            obj.__name__,
+            obj.__defaults__,
+            obj.__closure__,
+        )
+        # Copy over any additional attributes
+        wrapped.__dict__.update(obj.__dict__)
+        return cast(T, wrapped)
+        
+    # Create a new subclass of the object's type
+    class Wrapped(type(obj)):  # type: ignore
+        def __getattribute__(self, name: str) -> Any:
+            # Get attribute from original object
+            attr = super().__getattribute__(name)
+            
+            # Wrap functions/methods to use new globals
+            if isinstance(attr, (FunctionType, MethodType)):
+                return wrap_globals(attr, new_globals)
+                
+            return attr
+            
+        def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            if callable(obj):
+                # Get the underlying callable
+                func = super().__getattribute__('__call__')
+                # Wrap it if it's a function/method
+                if isinstance(func, (FunctionType, MethodType)):
+                    return wrap_globals(func, new_globals)(*args, **kwargs)
+                return func(*args, **kwargs)
+            raise TypeError(f"{obj!r} is not callable")
 
-    def __init__(self, obj: Any, new_globals: dict[str, Any]):
-        self._wrapped = obj
-        self._new_globals = new_globals
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        if callable(self._wrapped):
-            if isinstance(self._wrapped, (FunctionType, MethodType)):
-                # Create new function with modified globals
-                wrapped = FunctionType(
-                    self._wrapped.__code__,
-                    self._new_globals,
-                    self._wrapped.__name__,
-                    self._wrapped.__defaults__,
-                    self._wrapped.__closure__,
-                )
-                # Copy over any additional attributes
-                wrapped.__dict__.update(self._wrapped.__dict__)
-                return wrapped(*args, **kwargs)
-            # Handle other callable types
-            return self._wrapped(*args, **kwargs)
-        raise TypeError(f"{self._wrapped!r} is not callable")
-
-    def __getattr__(self, name: str) -> Any:
-        # Get the original attribute
-        attr = getattr(self._wrapped, name)
-        # Wrap functions/methods to use new globals
-        if isinstance(attr, (FunctionType, MethodType)):
-            return GlobalsWrapper(attr, self._new_globals)
-        return attr
-
-    def __repr__(self) -> str:
-        return f"GlobalsWrapper({self._wrapped!r})"
+    # Create instance of wrapper class with same state as original
+    wrapped = Wrapped()
+    wrapped.__dict__.update(obj.__dict__)
+    return cast(T, wrapped)
 
 
 class MergedModule(ModuleType):
@@ -343,7 +359,7 @@ class MergedModuleLoader(Loader):
             upper_vars = vars(module)
             for name, value in dict(vars(module._lower)).items():
                 if not name.startswith("__"):
-                    setattr(module, name, GlobalsWrapper(value, upper_vars))
+                    setattr(module, name, wrap_globals(value, upper_vars))
 
             # Then overlay upper module attributes
             for name, value in vars(module._upper).items():
