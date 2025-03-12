@@ -378,6 +378,36 @@ class MergedModuleLoader(Loader):
                             new_class = type(
                                 value.__name__, value.__bases__, class_dict
                             )
+
+                            # Handle properties specially
+                            for name, prop in inspect.getmembers(value, lambda x: isinstance(x, property)):
+                                # Wrap the property methods (getter, setter, deleter) if they exist
+                                fget = prop.fget and FunctionType(
+                                    prop.fget.__code__,
+                                    module.__dict__,
+                                    prop.fget.__name__,
+                                    prop.fget.__defaults__,
+                                    prop.fget.__closure__,
+                                )
+                                fset = prop.fset and FunctionType(
+                                    prop.fset.__code__,
+                                    module.__dict__, 
+                                    prop.fset.__name__,
+                                    prop.fset.__defaults__,
+                                    prop.fset.__closure__,
+                                )
+                                fdel = prop.fdel and FunctionType(
+                                    prop.fdel.__code__,
+                                    module.__dict__,
+                                    prop.fdel.__name__, 
+                                    prop.fdel.__defaults__,
+                                    prop.fdel.__closure__,
+                                )
+                                
+                                # Recreate property with wrapped methods
+                                wrapped_prop = property(fget=fget, fset=fset, fdel=fdel, doc=prop.__doc__)
+                                setattr(new_class, name, wrapped_prop)
+
                             # Copy methods with wrapped globals
                             for method_name, func in inspect.getmembers(
                                 value, predicate=inspect.isfunction
