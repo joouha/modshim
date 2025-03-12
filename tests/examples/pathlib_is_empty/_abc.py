@@ -1,13 +1,10 @@
-"""Enhanced pathlib with additional utility methods."""
-
-from __future__ import annotations
-
+"""Enhanced pathlib base classes."""
 from pathlib._abc import PathBase as OriginalPathBase
 
-
 class PathBase(OriginalPathBase):
-    """Enhanced Path with additional utilities."""
-
+    """Enhanced PathBase with additional utilities."""
+    
+    @property
     def is_empty(self) -> bool:
         """Return True if directory is empty or file has zero size."""
         if not self.exists():
