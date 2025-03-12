@@ -45,7 +45,7 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
         if isinstance(obj, MethodType):
             wrapped_func = wrap_globals(obj.__func__, new_globals)
             return cast(T, MethodType(wrapped_func, obj.__self__))
-            
+
         # Handle regular functions
         wrapped = FunctionType(
             obj.__code__,
@@ -67,13 +67,6 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
             def __getattribute__(self, name: str) -> Any:
                 # Get attribute from original object
                 attr = super().__getattribute__(name)
-
-                # For class attributes
-                if isinstance(self, type):
-                    # Wrap class methods and static methods
-                    if isinstance(attr, (FunctionType, MethodType)):
-                        return wrap_globals(attr, new_globals)
-                    return attr
 
                 # For instance attributes
                 if isinstance(attr, (FunctionType, MethodType)):
