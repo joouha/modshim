@@ -54,7 +54,7 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
         return cast(T, wrapped)
 
     # For built-in types that can't be subclassed, return as-is
-    if type(obj).__module__ == 'builtins':
+    if type(obj).__module__ == "builtins":
         return obj
 
     try:
@@ -70,15 +70,15 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
 
                 return attr
 
-            def __call__(self, *args: Any, **kwargs: Any) -> Any:
-                if callable(obj):
-                    # Get the underlying callable
-                    func = super().__getattribute__("__call__")
-                    # Wrap it if it's a function/method
-                    if isinstance(func, (FunctionType, MethodType)):
-                        return wrap_globals(func, new_globals)(*args, **kwargs)
-                    return func(*args, **kwargs)
-                raise TypeError(f"{obj!r} is not callable")
+            # def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            #     if callable(obj):
+            #         # Get the underlying callable
+            #         func = super().__getattribute__("__call__")
+            #         # Wrap it if it's a function/method
+            #         if isinstance(func, (FunctionType, MethodType)):
+            #             return wrap_globals(func, new_globals)(*args, **kwargs)
+            #         return func(*args, **kwargs)
+            #     raise TypeError(f"{obj!r} is not callable")
 
         # Create instance of wrapper class with same state as original
         wrapped = Wrapped.__new__(Wrapped)
