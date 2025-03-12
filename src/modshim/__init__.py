@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import inspect
 import logging
 import os
 import sys
@@ -28,79 +29,6 @@ if os.getenv("MODSHIM_DEBUG"):
 
 # Module-level storage for original import
 _original_import = builtins.__import__
-
-
-def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
-    """Create a wrapper that replaces an object's __globals__ while preserving its type.
-
-    Args:
-        obj: Object to wrap
-        new_globals: New globals dictionary to use
-
-    Returns:
-        A wrapped version of the object with the same type but modified globals
-    """
-    if isinstance(obj, (FunctionType, MethodType)):
-        # For bound methods, wrap the underlying function
-        if isinstance(obj, MethodType):
-            wrapped_func = wrap_globals(obj.__func__, new_globals)
-            return cast(T, MethodType(wrapped_func, obj.__self__))
-
-        # Handle regular functions
-        wrapped = FunctionType(
-            obj.__code__,
-            new_globals,
-            obj.__name__,
-            obj.__defaults__,
-            obj.__closure__,
-        )
-        # Copy over any additional attributes
-        wrapped.__dict__.update(obj.__dict__)
-        return cast(T, wrapped)
-
-    if isinstance(obj, str):
-        return obj
-
-    try:
-        # Create a new subclass of the object's type
-        class Wrapped(type(obj)):  # type: ignore
-            def __getattribute__(self, name: str) -> Any:
-                # Get attribute from original object
-                attr = super().__getattribute__(name)
-
-                # For instance attributes
-                if isinstance(attr, (FunctionType, MethodType)):
-                    return wrap_globals(attr, new_globals)
-
-                return attr
-    except TypeError:
-        return obj
-
-    # Create instance of wrapper class with same state as original
-    if isinstance(obj, type):
-        # For classes, we need to create a new type
-        # Handle classes with __slots__
-        if hasattr(obj, '__slots__'):
-            # Don't copy slot definitions into dict
-            d = {
-                k: v for k, v in vars(obj).items() 
-                if not k.startswith('__') or k in ('__module__', '__doc__', '__annotations__')
-            }
-        else:
-            d = dict(obj.__dict__)
-            
-        wrapped = Wrapped(obj.__name__, obj.__bases__, d)
-        # Also wrap any methods defined on the class
-        for name, attr in vars(wrapped).items():
-            if isinstance(attr, (FunctionType, MethodType)):
-                setattr(wrapped, name, wrap_globals(attr, new_globals))
-    else:
-        # For regular instances
-        wrapped = Wrapped.__new__(Wrapped)
-        if hasattr(obj, "__dict__"):
-            wrapped.__dict__.update(obj.__dict__)
-
-    return cast(T, wrapped)
 
 
 class MergedModule(ModuleType):
@@ -388,10 +316,108 @@ class MergedModuleLoader(Loader):
 
             for name, value in dict(lower_vars).items():
                 if not name.startswith("__"):
-                    print("Wrapping", name)
-                    wrapped = wrap_globals(value, merged_vars)
-                    print("Wrapped:", repr(wrapped))
-                    setattr(module, name, wrapped)
+                    if (
+                        hasattr(value, "__module__")
+                        and value.__module__ == self.lower_name
+                    ):
+                        if isinstance(value, MethodType):
+                            func = value.__func__
+                            wrapped_func = FunctionType(
+                                func.__code__,
+                                module.__dict__,
+                                func.__name__,
+                                func.__defaults__,
+                                func.__closure__,
+                            )
+                            wrapped_func.__kwdefaults__ = func.__kwdefaults__
+                            value = MethodType(wrapped_func, value.__self__)
+
+                        if isinstance(value, FunctionType):
+                            wrapped = FunctionType(
+                                value.__code__,
+                                module.__dict__,
+                                value.__name__,
+                                value.__defaults__,
+                                value.__closure__,
+                            )
+                            wrapped.__kwdefaults__ = value.__kwdefaults__
+                            wrapped.__dict__.update(value.__dict__)
+                            value = wrapped
+
+                        for method_name, func in inspect.getmembers(
+                            value, predicate=inspect.isfunction
+                        ):
+                            wrapped = FunctionType(
+                                func.__code__,
+                                module.__dict__,
+                                func.__name__,
+                                func.__defaults__,
+                                func.__closure__,
+                            )
+                            wrapped.__kwdefaults__ = func.__kwdefaults__
+                            wrapped.__dict__.update(value.__dict__)
+                            setattr(value, method_name, wrapped)
+
+                        if isinstance(value, type):
+                            # Handle classes
+                            # Create new class with same name and bases
+                            class_dict = {}
+                            # Copy over special attributes
+                            for attr in (
+                                "__module__",
+                                "__doc__",
+                                "__annotations__",
+                            ):
+                                if hasattr(value, attr):
+                                    class_dict[attr] = getattr(value, attr)
+                            # Copy slots definition
+                            # Check if class uses slots
+                            if hasattr(value, "__slots__"):
+                                class_dict["__slots__"] = value.__slots__
+                            # Create new class
+                            new_class = type(
+                                value.__name__, value.__bases__, class_dict
+                            )
+                            # Copy methods with wrapped globals
+                            for method_name, func in inspect.getmembers(
+                                value, predicate=inspect.isfunction
+                            ):
+                                wrapped = FunctionType(
+                                    func.__code__,
+                                    module.__dict__,
+                                    func.__name__,
+                                    func.__defaults__,
+                                    func.__closure__,
+                                )
+                                wrapped.__kwdefaults__ = func.__kwdefaults__
+                                wrapped.__dict__.update(func.__dict__)
+                                setattr(new_class, method_name, wrapped)
+                            value = new_class
+
+                        for method_name, method in inspect.getmembers(
+                            value, predicate=inspect.ismethod
+                        ):
+                            if method_name.startswith("__"):
+                                continue
+                            # if hasattr(method, "__func__") and isinstance( method.__func__, FunctionType ):
+                            func = method.__func__
+                            if hasattr(func, "__code__"):
+                                wrapped_func = FunctionType(
+                                    func.__code__,
+                                    module.__dict__,
+                                    func.__name__,
+                                    func.__defaults__,
+                                    func.__closure__,
+                                )
+                                wrapped_func.__kwdefaults__ = func.__kwdefaults__
+                                wrapped = MethodType(wrapped_func, value)
+                                try:
+                                    setattr(value, method_name, wrapped)
+                                except AttributeError:
+                                    pass
+                                # print(f"{name=} {value=} {method_name=}")
+
+                    setattr(module, name, value)
 
             # Then overlay upper module attributes
             for name, value in vars(module._upper).items():
@@ -399,9 +425,9 @@ class MergedModuleLoader(Loader):
                     # Check if this value exists in lower module by identity
                     # print(name, value, id(value), id(value) in lower_ids)
                     # print({id(v): v for k, v in lower_vars.items() if k == "datetime"})
-                    if id(value) in lower_ids or True:
-                        # This value was imported from lower, wrap its globals
-                        value = wrap_globals(value, merged_vars)
+                    # if id(value) in lower_ids or True:
+                    #     # This value was imported from lower, wrap its globals
+                    #     value = wrap_globals(value, merged_vars)
                     setattr(module, name, value)
 
 
