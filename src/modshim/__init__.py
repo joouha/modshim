@@ -368,6 +368,8 @@ class MergedModuleLoader(Loader):
             merged_vars = vars(module)
             lower_vars = vars(module._lower)
 
+            lower_vars = vars(import_module(self.lower_name))
+
             # Build set of object IDs from lower module
             lower_ids = {id(value) for value in lower_vars.values()}
 
@@ -379,7 +381,9 @@ class MergedModuleLoader(Loader):
             for name, value in vars(module._upper).items():
                 if not name.startswith("__"):
                     # Check if this value exists in lower module by identity
-                    if id(value) in lower_ids:
+                    # print(name, value, id(value), id(value) in lower_ids)
+                    # print({id(v): v for k, v in lower_vars.items() if k == "datetime"})
+                    if id(value) in lower_ids or True:
                         # This value was imported from lower, wrap its globals
                         value = wrap_globals(value, merged_vars)
                     setattr(module, name, value)
