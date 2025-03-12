@@ -365,20 +365,23 @@ class MergedModuleLoader(Loader):
                     log.debug("Executed lower '%s'", module._lower.__spec__.name)
 
             # Copy attributes from lower first
-            upper_vars = vars(module)
+            merged_vars = vars(module)
+            # upper_vars = vars(module._upper)
             lower_vars = vars(module._lower)
+
             for name, value in dict(lower_vars).items():
                 if not name.startswith("__"):
-                    setattr(module, name, wrap_globals(value, upper_vars))
+                    setattr(module, name, wrap_globals(value, merged_vars))
 
             # Then overlay upper module attributes
             for name, value in vars(module._upper).items():
                 if not name.startswith("__"):
                     # Check if this value exists in lower module and matches by identity
                     lower_value = lower_vars.get(name)
+                    print(name, value, lower_value)
                     if lower_value is not None and id(value) == id(lower_value):
                         # This value was imported from lower, wrap its globals
-                        value = wrap_globals(value, upper_vars)
+                        value = wrap_globals(value, merged_vars)
                     setattr(module, name, value)
 
 
