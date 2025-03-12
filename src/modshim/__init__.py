@@ -339,10 +339,15 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         Wrapped object with updated globals
     """
     if isinstance(value, FunctionType):
+        # Create new globals dict with builtins
+        new_globals = dict(module.__dict__)
+        if '__builtins__' not in new_globals:
+            new_globals['__builtins__'] = builtins
+            
         # Wrap standalone functions
         wrapped = FunctionType(
             value.__code__,
-            module.__dict__,  # Use merged module's globals
+            new_globals,  # Use merged module's globals with builtins
             value.__name__,
             value.__defaults__,
             value.__closure__,
