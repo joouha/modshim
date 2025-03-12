@@ -76,7 +76,7 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
             raise TypeError(f"{obj!r} is not callable")
 
     # Create instance of wrapper class with same state as original
-    wrapped = object.__new__(Wrapped)
+    wrapped = Wrapped.__new__(Wrapped)
     if hasattr(obj, "__dict__"):
         wrapped.__dict__.update(obj.__dict__)
     return cast(T, wrapped)
