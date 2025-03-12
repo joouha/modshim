@@ -56,17 +56,20 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
     if isinstance(obj, str):
         return obj
 
-    # Create a new subclass of the object's type
-    class Wrapped(type(obj)):  # type: ignore
-        def __getattribute__(self, name: str) -> Any:
-            # Get attribute from original object
-            attr = super().__getattribute__(name)
+    try:
+        # Create a new subclass of the object's type
+        class Wrapped(type(obj)):  # type: ignore
+            def __getattribute__(self, name: str) -> Any:
+                # Get attribute from original object
+                attr = super().__getattribute__(name)
 
-            # Wrap functions/methods to use new globals
-            if isinstance(attr, (FunctionType, MethodType)):
-                return wrap_globals(attr, new_globals)
+                # Wrap functions/methods to use new globals
+                if isinstance(attr, (FunctionType, MethodType)):
+                    return wrap_globals(attr, new_globals)
 
-            return attr
+                return attr
+    except TypeError:
+        return obj
 
     # Create instance of wrapper class with same state as original
     if isinstance(obj, type):
@@ -75,9 +78,7 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
     else:
         # For regular instances
         wrapped = Wrapped.__new__(Wrapped)
-        if hasattr(obj, "__dict__"):
-            wrapped.__dict__.update(obj.__dict__)
-    
+
     return cast(T, wrapped)
 
 
