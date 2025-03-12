@@ -366,8 +366,10 @@ class MergedModuleLoader(Loader):
 
             # Copy attributes from lower first
             merged_vars = vars(module)
-            # upper_vars = vars(module._upper)
             lower_vars = vars(module._lower)
+
+            # Build set of object IDs from lower module
+            lower_ids = {id(value) for value in lower_vars.values()}
 
             for name, value in dict(lower_vars).items():
                 if not name.startswith("__"):
@@ -376,10 +378,8 @@ class MergedModuleLoader(Loader):
             # Then overlay upper module attributes
             for name, value in vars(module._upper).items():
                 if not name.startswith("__"):
-                    # Check if this value exists in lower module and matches by identity
-                    lower_value = lower_vars.get(name)
-                    print(name, value, lower_value)
-                    if lower_value is not None and id(value) == id(lower_value):
+                    # Check if this value exists in lower module by identity
+                    if id(value) in lower_ids:
                         # This value was imported from lower, wrap its globals
                         value = wrap_globals(value, merged_vars)
                     setattr(module, name, value)
