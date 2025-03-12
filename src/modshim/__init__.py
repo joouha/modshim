@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from importlib import import_module
 from importlib.abc import Loader
 from importlib.util import find_spec, module_from_spec, spec_from_loader
-from types import ModuleType
+from types import FunctionType, MethodType, ModuleType
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
@@ -26,6 +26,43 @@ if os.getenv("MODSHIM_DEBUG"):
 
 # Module-level storage for original import
 _original_import = builtins.__import__
+
+
+class GlobalsWrapper:
+    """Wrapper that replaces an object's __globals__ dictionary."""
+
+    def __init__(self, obj: Any, new_globals: dict[str, Any]):
+        self._wrapped = obj
+        self._new_globals = new_globals
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        if callable(self._wrapped):
+            if isinstance(self._wrapped, (FunctionType, MethodType)):
+                # Create new function with modified globals
+                wrapped = FunctionType(
+                    self._wrapped.__code__,
+                    self._new_globals,
+                    self._wrapped.__name__,
+                    self._wrapped.__defaults__,
+                    self._wrapped.__closure__,
+                )
+                # Copy over any additional attributes
+                wrapped.__dict__.update(self._wrapped.__dict__)
+                return wrapped(*args, **kwargs)
+            # Handle other callable types
+            return self._wrapped(*args, **kwargs)
+        raise TypeError(f"{self._wrapped!r} is not callable")
+
+    def __getattr__(self, name: str) -> Any:
+        # Get the original attribute
+        attr = getattr(self._wrapped, name)
+        # Wrap functions/methods to use new globals
+        if isinstance(attr, (FunctionType, MethodType)):
+            return GlobalsWrapper(attr, self._new_globals)
+        return attr
+
+    def __repr__(self) -> str:
+        return f"GlobalsWrapper({self._wrapped!r})"
 
 
 class MergedModule(ModuleType):
@@ -61,6 +98,10 @@ class MergedModule(ModuleType):
             The attribute value from upper module if it exists, otherwise from lower
         """
         log.debug("Getting attribute '%s' from module '%s'", name, self)
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            pass
         # Check upper module
         try:
             return getattr(self._upper, name)
@@ -299,9 +340,10 @@ class MergedModuleLoader(Loader):
                     log.debug("Executed lower '%s'", module._lower.__spec__.name)
 
             # Copy attributes from lower first
-            for name, value in vars(module._lower).items():
+            upper_vars = vars(module)
+            for name, value in dict(vars(module._lower)).items():
                 if not name.startswith("__"):
-                    setattr(module, name, value)
+                    setattr(module, name, GlobalsWrapper(value, upper_vars))
 
             # Then overlay upper module attributes
             for name, value in vars(module._upper).items():
