@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from importlib.machinery import ModuleSpec
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 # Set up logger with NullHandler
 log = logging.getLogger(__name__)
@@ -30,13 +30,13 @@ if os.getenv("MODSHIM_DEBUG"):
 _original_import = builtins.__import__
 
 
-def wrap_globals(obj: T, new_globals: Dict[str, Any]) -> T:
+def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
     """Create a wrapper that replaces an object's __globals__ while preserving its type.
-    
+
     Args:
         obj: Object to wrap
         new_globals: New globals dictionary to use
-        
+
     Returns:
         A wrapped version of the object with the same type but modified globals
     """
@@ -52,23 +52,23 @@ def wrap_globals(obj: T, new_globals: Dict[str, Any]) -> T:
         # Copy over any additional attributes
         wrapped.__dict__.update(obj.__dict__)
         return cast(T, wrapped)
-        
+
     # Create a new subclass of the object's type
     class Wrapped(type(obj)):  # type: ignore
         def __getattribute__(self, name: str) -> Any:
             # Get attribute from original object
             attr = super().__getattribute__(name)
-            
+
             # Wrap functions/methods to use new globals
             if isinstance(attr, (FunctionType, MethodType)):
                 return wrap_globals(attr, new_globals)
-                
+
             return attr
-            
+
         def __call__(self, *args: Any, **kwargs: Any) -> Any:
             if callable(obj):
                 # Get the underlying callable
-                func = super().__getattribute__('__call__')
+                func = super().__getattribute__("__call__")
                 # Wrap it if it's a function/method
                 if isinstance(func, (FunctionType, MethodType)):
                     return wrap_globals(func, new_globals)(*args, **kwargs)
@@ -77,7 +77,8 @@ def wrap_globals(obj: T, new_globals: Dict[str, Any]) -> T:
 
     # Create instance of wrapper class with same state as original
     wrapped = Wrapped()
-    wrapped.__dict__.update(obj.__dict__)
+    if hasattr(obj, "__dict__"):
+        wrapped.__dict__.update(obj.__dict__)
     return cast(T, wrapped)
 
 
