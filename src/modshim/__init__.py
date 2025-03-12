@@ -56,13 +56,9 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
     if isinstance(obj, str):
         return obj
 
-    # try:
     # Create a new subclass of the object's type
-
     class Wrapped(type(obj)):  # type: ignore
         def __getattribute__(self, name: str) -> Any:
-            if name == "p":
-                return 999
             # Get attribute from original object
             attr = super().__getattribute__(name)
 
@@ -73,14 +69,16 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
             return attr
 
     # Create instance of wrapper class with same state as original
-    wrapped = Wrapped.__new__(Wrapped)
-    if hasattr(obj, "__dict__"):
-        wrapped.__dict__.update(obj.__dict__)
-    print(wrapped.__dict__)
+    if isinstance(obj, type):
+        # For classes, we need to create a new type
+        wrapped = Wrapped(obj.__name__, obj.__bases__, dict(obj.__dict__))
+    else:
+        # For regular instances
+        wrapped = Wrapped.__new__(Wrapped)
+        if hasattr(obj, "__dict__"):
+            wrapped.__dict__.update(obj.__dict__)
+    
     return cast(T, wrapped)
-    # except TypeError:
-    #     # If we can't create a wrapper, return the original object
-    #     return obj
 
 
 class MergedModule(ModuleType):
