@@ -79,7 +79,17 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
     # Create instance of wrapper class with same state as original
     if isinstance(obj, type):
         # For classes, we need to create a new type
-        wrapped = Wrapped(obj.__name__, obj.__bases__, dict(obj.__dict__))
+        # Handle classes with __slots__
+        if hasattr(obj, '__slots__'):
+            # Don't copy slot definitions into dict
+            d = {
+                k: v for k, v in vars(obj).items() 
+                if not k.startswith('__') or k in ('__module__', '__doc__', '__annotations__')
+            }
+        else:
+            d = dict(obj.__dict__)
+            
+        wrapped = Wrapped(obj.__name__, obj.__bases__, d)
         # Also wrap any methods defined on the class
         for name, attr in vars(wrapped).items():
             if isinstance(attr, (FunctionType, MethodType)):
