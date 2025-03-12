@@ -53,41 +53,34 @@ def wrap_globals(obj: T, new_globals: dict[str, Any]) -> T:
         wrapped.__dict__.update(obj.__dict__)
         return cast(T, wrapped)
 
-    # For built-in types that can't be subclassed, return as-is
-    if type(obj).__module__ == "builtins":
+    if isinstance(obj, str):
         return obj
 
-    try:
-        # Create a new subclass of the object's type
-        class Wrapped(type(obj)):  # type: ignore
-            def __getattribute__(self, name: str) -> Any:
-                # Get attribute from original object
-                attr = super().__getattribute__(name)
+    # try:
+    # Create a new subclass of the object's type
 
-                # Wrap functions/methods to use new globals
-                if isinstance(attr, (FunctionType, MethodType)):
-                    return wrap_globals(attr, new_globals)
+    class Wrapped(type(obj)):  # type: ignore
+        def __getattribute__(self, name: str) -> Any:
+            if name == "p":
+                return 999
+            # Get attribute from original object
+            attr = super().__getattribute__(name)
 
-                return attr
+            # Wrap functions/methods to use new globals
+            if isinstance(attr, (FunctionType, MethodType)):
+                return wrap_globals(attr, new_globals)
 
-            # def __call__(self, *args: Any, **kwargs: Any) -> Any:
-            #     if callable(obj):
-            #         # Get the underlying callable
-            #         func = super().__getattribute__("__call__")
-            #         # Wrap it if it's a function/method
-            #         if isinstance(func, (FunctionType, MethodType)):
-            #             return wrap_globals(func, new_globals)(*args, **kwargs)
-            #         return func(*args, **kwargs)
-            #     raise TypeError(f"{obj!r} is not callable")
+            return attr
 
-        # Create instance of wrapper class with same state as original
-        wrapped = Wrapped.__new__(Wrapped)
-        if hasattr(obj, "__dict__"):
-            wrapped.__dict__.update(obj.__dict__)
-        return cast(T, wrapped)
-    except TypeError:
-        # If we can't create a wrapper, return the original object
-        return obj
+    # Create instance of wrapper class with same state as original
+    wrapped = Wrapped.__new__(Wrapped)
+    if hasattr(obj, "__dict__"):
+        wrapped.__dict__.update(obj.__dict__)
+    print(wrapped.__dict__)
+    return cast(T, wrapped)
+    # except TypeError:
+    #     # If we can't create a wrapper, return the original object
+    #     return obj
 
 
 class MergedModule(ModuleType):
@@ -375,7 +368,10 @@ class MergedModuleLoader(Loader):
 
             for name, value in dict(lower_vars).items():
                 if not name.startswith("__"):
-                    setattr(module, name, wrap_globals(value, merged_vars))
+                    print("Wrapping", name)
+                    wrapped = wrap_globals(value, merged_vars)
+                    print("Wrapped:", repr(wrapped))
+                    setattr(module, name, wrapped)
 
             # Then overlay upper module attributes
             for name, value in vars(module._upper).items():
