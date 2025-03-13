@@ -399,13 +399,23 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
             doc=value.__doc__,
         )
 
+    elif hasattr(value, "__get__") or hasattr(value, "__set__"):
+        # Handle descriptors by wrapping their __get__ and __set__ methods
+        for name in ["__get__", "__set__", "__delete__"]:
+            if hasattr(value, name):
+                method = getattr(value, name)
+                if isinstance(method, (FunctionType, MethodType)):
+                    wrapped = wrap_globals(method, module)
+                    try:
+                        setattr(value, name, wrapped)
+                    except AttributeError:
+                        pass  # Skip if attribute can't be set
+        return value
+
     elif isinstance(value, type):
         # For classes, only wrap their methods
         for name, attr in inspect.getmembers(value):
             if isinstance(attr, (FunctionType, property)):
-                # if value.__name__ in {"Path", "PathBase"}:
-                #     if attr.__name__ in {"__init__"}:
-                # #         return value
                 wrapped = wrap_globals(attr, module)
                 setattr(value, name, wrapped)
         return value
