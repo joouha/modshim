@@ -382,13 +382,33 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         )
 
     elif isinstance(value, type):
-        # For classes, only wrap their methods
+        # For classes, wrap their methods and preserve inheritance chain
         log.debug("Class bases: %r", value.__bases__)
-        for name, attr in inspect.getmembers(value):
-            if isinstance(attr, (FunctionType, property)):
+        
+        # Create new bases tuple with wrapped base classes
+        new_bases = tuple(
+            wrap_globals(base, module) if hasattr(base, '__module__') and 
+            (base.__module__ == module._lower.__name__ or 
+             base.__module__.startswith(f"{module._lower.__name__}."))
+            else base 
+            for base in value.__bases__
+        )
+        
+        # Create new class with wrapped bases
+        wrapped_class = type(
+            value.__name__,
+            new_bases,
+            dict(value.__dict__)
+        )
+        
+        # Wrap methods and properties
+        for name, attr in inspect.getmembers(wrapped_class):
+            if isinstance(attr, (FunctionType, property, MethodType)):
                 wrapped = wrap_globals(attr, module)
-                setattr(value, name, wrapped)
-        return value
+                setattr(wrapped_class, name, wrapped)
+        
+        wrapped_class.__module__ = module.__name__
+        return wrapped_class
 
     else:
         # For other objects, wrap any bound methods
