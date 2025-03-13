@@ -63,7 +63,7 @@ class MergedModule(ModuleType):
         Returns:
             The attribute value from upper module if it exists, otherwise from lower
         """
-        log.debug("Getting attribute '%s' from module '%s'", name, self)
+        log.debug("Getting attribute '%s' from module '%s'", name, self.__name__)
         try:
             return super().__getattr__(name)
         except AttributeError:
@@ -132,10 +132,10 @@ class MergedModuleLoader(Loader):
                 # Restore original built-in import function in case it is hooked
                 builtins.__import__ = _original_import
                 # Upper module gets executed at this point if it not already imported
-                upper_module = import_module(self.upper_name)
-            except ImportError:
-                # If it does not exist, we use an empty module as the upper
-                upper_module = ModuleType(self.upper_name)
+                if upper_spec := find_spec(self.upper_name):
+                    upper_module = module_from_spec(upper_spec)
+                else:
+                    upper_module = ModuleType(self.upper_name)
             finally:
                 # Restore potentially hooked import function
                 builtins.__import__ = current_import
@@ -143,6 +143,7 @@ class MergedModuleLoader(Loader):
             # Restore the finder
             with MergedModuleFinder._meta_path_lock:
                 sys.meta_path.insert(0, self.finder)
+        upper_module.__package__ = self.finder.upper_name
 
         # Create a copy of the lower module
         lower_spec = find_spec(self.lower_name)
@@ -154,10 +155,12 @@ class MergedModuleLoader(Loader):
 
         # Create merged module
         merged = MergedModule(spec.name, upper_module, lower_module, self.finder)
-        merged.__package__ = spec.parent
+        merged.__package__ = spec.name
         path_attr = getattr(upper_module, "__path__", None)
         if path_attr is not None:
             merged.__path__ = list(path_attr)
+        # Add to sys.modules
+        sys.modules[self.merged_name] = merged
 
         # Store in cache
         with self.finder._cache_lock:
@@ -207,18 +210,33 @@ class MergedModuleLoader(Loader):
 
         # Check if we're in the lower module importing from within the lower module
         replace = (
-            caller_package == self.finder.lower_name
-            or caller_module.startswith(self.finder.lower_name + ".")
+            (
+                caller_package == self.finder.lower_name
+                or caller_module.startswith(self.finder.lower_name + ".")
+            )
+            or (
+                caller_package == self.finder.upper_name
+                or caller_module.startswith(self.finder.upper_name + ".")
+            )
         ) and (
             name == self.finder.lower_name
             or name.startswith(self.finder.lower_name + ".")
         )
 
         if replace:
+            # name = name.replace(self.finder.lower_name, self.finder.merged_name, 1)
             name = name.replace(self.finder.lower_name, self.finder.merged_name, 1)
             log.debug("Redirecting import '%s' to '%s'", original_name, name)
 
-        # Perform the import using the original builtin import function
+        # If we're importing the module we're currently creating, return its lower module
+        if name == self.merged_name:
+            # Get the module from the finder's cache
+            key = (self.upper_name, self.lower_name, self.merged_name)
+            with self.finder._cache_lock:
+                if key in self.finder.cache:
+                    return self.finder.cache[key]._lower
+
+        # Perform the import using the original builtin import function:w
         result = _original_import(name, globals, locals, fromlist, level)
 
         # For relative imports, add the module to the caller's namespace
@@ -237,6 +255,7 @@ class MergedModuleLoader(Loader):
             ]:
                 current = result
                 for part in extra_parts:
+                    log.debug("Traversing to '%s' via '%s'", part, current)
                     try:
                         current = getattr(current, part)
                     except AttributeError:
@@ -303,38 +322,43 @@ class MergedModuleLoader(Loader):
             self.lower_name,
         )
 
-        if "__builtins__" not in module.__dict__:
-            module.__builtins__ = builtins
-
         # Use global lock for entire module execution
         with self._global_import_lock:
-            with self.hook_imports():
-                # Execute lower module with our import hook active if it has a loader
-                if module._lower.__spec__ and module._lower.__spec__.loader:
-                    log.debug("Executing lower '%s'", module._lower.__spec__.name)
+            # Execute lower module with our import hook active if it has a loader
+            if module._lower.__spec__ and module._lower.__spec__.loader:
+                log.debug("Executing lower '%s'", module._lower.__spec__.name)
+                with self.hook_imports():
                     module._lower.__spec__.loader.exec_module(module._lower)
-                    log.debug("Executed lower '%s'", module._lower.__spec__.name)
+                log.debug("Executed lower '%s'", module._lower.__spec__.name)
 
             # Copy attributes from lower first
-            for name, value in dict(vars(module._lower)).items():
-                if not name.startswith("__"):
-                    if (
-                        hasattr(value, "__module__")
-                        and value.__module__ == self.lower_name
-                    ):
-                        value = wrap_globals(value, module)
+            module.__dict__.update(
+                {
+                    k: v
+                    for k, v in module._lower.__dict__.items()
+                    if not k.startswith("__")
+                }
+            )
 
-                    setattr(module, name, value)
+            # Execute upper module without import hook
+            if module._upper.__spec__ and module._upper.__spec__.loader:
+                log.debug("Executing upper '%s'", module._upper.__spec__.name)
+                module._upper.__spec__.loader.exec_module(module._upper)
+                log.debug("Executed upper '%s'", module._upper.__spec__.name)
 
-            # Then overlay upper module attributes
-            for name, value in dict(vars(module._upper)).items():
-                if not name.startswith("__"):
-                    if (
-                        hasattr(value, "__module__")
-                        and value.__module__ == self.upper_name
-                    ):
-                        # Wrap object from upper module
-                        value = wrap_globals(value, module)
+            # Copy attributes from upper
+            module.__dict__.update(
+                {
+                    k: v
+                    for k, v in module._upper.__dict__.items()
+                    if not k.startswith("__")
+                }
+            )
+
+            # Replace globals on any attributes from lower
+            for name, value in dict(vars(module)).items():
+                if hasattr(value, "__module__") and value.__module__ == self.lower_name:
+                    value = wrap_globals(value, module)
                     setattr(module, name, value)
 
 
@@ -348,17 +372,11 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
     Returns:
         Wrapped object with updated globals
     """
-    log.debug(
-        "Wrapping globals for %r (type=%s) from module %s",
-        value,
-        type(value).__name__,
-        module.__name__,
-    )
     if isinstance(value, FunctionType):
         # Wrap standalone functions
         wrapped = FunctionType(
             value.__code__,
-            module.__dict__,  # Use merged module's globals
+            {**value.__globals__, **module.__dict__},
             value.__name__,
             value.__defaults__,
             value.__closure__,
@@ -382,33 +400,15 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         )
 
     elif isinstance(value, type):
-        # For classes, wrap their methods and preserve inheritance chain
-        log.debug("Class bases: %r", value.__bases__)
-        
-        # Create new bases tuple with wrapped base classes
-        new_bases = tuple(
-            wrap_globals(base, module) if hasattr(base, '__module__') and 
-            (base.__module__ == module._lower.__name__ or 
-             base.__module__.startswith(f"{module._lower.__name__}."))
-            else base 
-            for base in value.__bases__
-        )
-        
-        # Create new class with wrapped bases
-        wrapped_class = type(
-            value.__name__,
-            new_bases,
-            dict(value.__dict__)
-        )
-        
-        # Wrap methods and properties
-        for name, attr in inspect.getmembers(wrapped_class):
-            if isinstance(attr, (FunctionType, property, MethodType)):
+        # For classes, only wrap their methods
+        for name, attr in inspect.getmembers(value):
+            if isinstance(attr, (FunctionType, property)):
+                # if value.__name__ in {"Path", "PathBase"}:
+                #     if attr.__name__ in {"__init__"}:
+                #         return value
                 wrapped = wrap_globals(attr, module)
-                setattr(wrapped_class, name, wrapped)
-        
-        wrapped_class.__module__ = module.__name__
-        return wrapped_class
+                setattr(value, name, wrapped)
+        return value
 
     else:
         # For other objects, wrap any bound methods
