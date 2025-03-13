@@ -358,16 +358,16 @@ class MergedModuleLoader(Loader):
             # Replace globals on any attributes from lower
             for name, value in dict(vars(module)).items():
                 if hasattr(value, "__module__") and value.__module__ == self.lower_name:
-                    value = wrap_globals(value, module)
+                    value = wrap_globals(value, module.__dict__)
                     setattr(module, name, value)
 
 
-def wrap_globals(value: Any, module: ModuleType) -> Any:
-    """Wrap an object's globals to use the merged module's namespace.
+def wrap_globals(value: Any, new_globals: dict[str, Any]) -> Any:
+    """Wrap an object's globals to use the provided globals dictionary.
 
     Args:
         value: Object to wrap
-        module: Module whose globals should be used
+        new_globals: Dictionary of globals to use
 
     Returns:
         Wrapped object with updated globals
@@ -376,13 +376,13 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         # Wrap standalone functions or methods
         wrapped = FunctionType(
             value.__code__,
-            {**value.__globals__, **module.__dict__},
+            {**value.__globals__, **new_globals},
             value.__name__,
             value.__defaults__,
             value.__closure__,
         )
         wrapped.__kwdefaults__ = value.__kwdefaults__
-        wrapped.__module__ = module.__name__
+        wrapped.__module__ = new_globals.get('__name__', value.__module__)
         return wrapped
 
     elif isinstance(value, MethodType):
@@ -393,9 +393,9 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
     elif isinstance(value, property):
         # Handle properties
         return property(
-            fget=wrap_globals(value.fget, module) if value.fget else None,
-            fset=wrap_globals(value.fset, module) if value.fset else None,
-            fdel=wrap_globals(value.fdel, module) if value.fdel else None,
+            fget=wrap_globals(value.fget, new_globals) if value.fget else None,
+            fset=wrap_globals(value.fset, new_globals) if value.fset else None,
+            fdel=wrap_globals(value.fdel, new_globals) if value.fdel else None,
             doc=value.__doc__,
         )
 
@@ -412,7 +412,7 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
             #     setattr(value, name, wrapped)
             #     continue
             if isinstance(attr, (FunctionType, property)):
-                wrapped = wrap_globals(attr, module)
+                wrapped = wrap_globals(attr, new_globals)
                 setattr(value, name, wrapped)
         return value
 
@@ -420,7 +420,7 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         # For other objects, wrap any bound methods
         for name, method in inspect.getmembers(value, predicate=inspect.ismethod):
             if hasattr(method.__func__, "__code__"):  # Only wrap real methods
-                wrapped = wrap_globals(method.__func__, module)
+                wrapped = wrap_globals(method.__func__, new_globals)
                 try:
                     setattr(value, name, MethodType(wrapped, value))
                 except AttributeError:
