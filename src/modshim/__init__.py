@@ -403,8 +403,11 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         # For classes, only wrap their methods
         for name, attr in inspect.getmembers(value):
             if isinstance(attr, (FunctionType, property)):
-                # if value.__name__ in {"Path", "PathBase"}:
-                #     if attr.__name__ in {"__init__"}:
+                if value.__name__ in {"Path", "PathBase"}:
+                    if attr.__name__ in {"__init__"}:
+                        if isinstance(attr, (FunctionType,)):
+                            print(attr.__closure__)
+                            print(inspect.getclosurevars(attr))
                 #         return value
                 wrapped = wrap_globals(attr, module)
                 setattr(value, name, wrapped)
