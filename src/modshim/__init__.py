@@ -348,8 +348,12 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
     Returns:
         Wrapped object with updated globals
     """
-    log.debug("Wrapping globals for %r (type=%s) from module %s", 
-              value, type(value).__name__, module.__name__)
+    log.debug(
+        "Wrapping globals for %r (type=%s) from module %s",
+        value,
+        type(value).__name__,
+        module.__name__,
+    )
     if isinstance(value, FunctionType):
         # Wrap standalone functions
         wrapped = FunctionType(
