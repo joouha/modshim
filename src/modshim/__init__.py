@@ -13,7 +13,7 @@ from importlib import import_module
 from importlib.abc import Loader
 from importlib.util import find_spec, module_from_spec, spec_from_loader
 from types import FunctionType, MethodType, ModuleType
-from typing import TYPE_CHECKING, Any, Callable, Dict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -373,34 +373,10 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         Wrapped object with updated globals
     """
     if isinstance(value, FunctionType):
-        # Get class context if this is a method
-        if hasattr(value, '__qualname__'):
-            parts = value.__qualname__.split('.')
-            if len(parts) > 1:  # It's a method
-                try:
-                    cls_name = parts[-2]
-                    cls = value.__globals__[cls_name]
-                    # Only log for Path/PathBase classes and their __init__ methods
-                    if cls_name in {'Path', 'PathBase'} and parts[-1] == '__init__':
-                        log.debug("Wrapping function: %s", value.__qualname__)
-                        log.debug("Original globals keys: %s", list(value.__globals__.keys()))
-                        log.debug("Found class %s for method %s", cls_name, parts[-1])
-                        log.debug("Class MRO: %s", cls.__mro__)
-                except (KeyError, AttributeError) as e:
-                    if parts[-2] in {'Path', 'PathBase'} and parts[-1] == '__init__':
-                        log.debug("Failed to get class context: %s", e)
-
-        # Create new globals
-        new_globals = {**value.__globals__, **module.__dict__}
-        if (hasattr(value, '__qualname__') and 
-            len(value.__qualname__.split('.')) > 1 and
-            value.__qualname__.split('.')[-2] in {'Path', 'PathBase'} and
-            value.__qualname__.split('.')[-1] == '__init__'):
-            log.debug("New globals keys: %s", list(new_globals.keys()))
-
+        # Wrap standalone functions or methods
         wrapped = FunctionType(
             value.__code__,
-            new_globals,
+            {**value.__globals__, **module.__dict__},
             value.__name__,
             value.__defaults__,
             value.__closure__,
@@ -424,16 +400,12 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         )
 
     elif isinstance(value, type):
-        # Only log for Path/PathBase classes
-        if value.__name__ in {'Path', 'PathBase'}:
-            log.debug("Processing class: %s", value.__name__)
-            log.debug("Class slots: %s", getattr(value, '__slots__', None))
-            log.debug("Class MRO: %s", value.__mro__)
-        
-        # For classes, wrap their methods
+        # For classes, only wrap their methods
         for name, attr in inspect.getmembers(value):
             if isinstance(attr, (FunctionType, property)):
-                log.debug("Wrapping class member: %s.%s", value.__name__, name)
+                # if value.__name__ in {"Path", "PathBase"}:
+                #     if attr.__name__ in {"__init__"}:
+                # #         return value
                 wrapped = wrap_globals(attr, module)
                 setattr(value, name, wrapped)
         return value
