@@ -373,28 +373,10 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         Wrapped object with updated globals
     """
     if isinstance(value, FunctionType):
-        # Get the class that owns this method, if any
-        if hasattr(value, '__qualname__'):
-            parts = value.__qualname__.split('.')
-            if len(parts) > 1:  # It's a method
-                try:
-                    cls = value.__globals__[parts[-2]]  # Get the class
-                    # Include the class and all its bases in the new globals
-                    new_globals = {**value.__globals__}
-                    for base in cls.__mro__:
-                        new_globals[base.__name__] = base
-                    new_globals.update(module.__dict__)
-                except (KeyError, AttributeError):
-                    new_globals = {**value.__globals__, **module.__dict__}
-            else:
-                new_globals = {**value.__globals__, **module.__dict__}
-        else:
-            new_globals = {**value.__globals__, **module.__dict__}
-
         # Wrap standalone functions or methods
         wrapped = FunctionType(
             value.__code__,
-            new_globals,
+            {**value.__globals__, **module.__dict__},
             value.__name__,
             value.__defaults__,
             value.__closure__,
@@ -421,12 +403,9 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
         # For classes, only wrap their methods
         for name, attr in inspect.getmembers(value):
             if isinstance(attr, (FunctionType, property)):
-                if value.__name__ in {"Path", "PathBase"}:
-                    if attr.__name__ in {"__init__"}:
-                        if isinstance(attr, (FunctionType,)):
-                            print(attr.__closure__)
-                            print(inspect.getclosurevars(attr))
-                #         return value
+                # if value.__name__ in {"Path", "PathBase"}:
+                #     if attr.__name__ in {"__init__"}:
+                # #         return value
                 wrapped = wrap_globals(attr, module)
                 setattr(value, name, wrapped)
         return value
