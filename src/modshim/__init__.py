@@ -348,6 +348,8 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
     Returns:
         Wrapped object with updated globals
     """
+    log.debug("Wrapping globals for %r (type=%s) from module %s", 
+              value, type(value).__name__, module.__name__)
     if isinstance(value, FunctionType):
         # Wrap standalone functions
         wrapped = FunctionType(
@@ -377,6 +379,7 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
 
     elif isinstance(value, type):
         # For classes, only wrap their methods
+        log.debug("Class bases: %r", value.__bases__)
         for name, attr in inspect.getmembers(value):
             if isinstance(attr, (FunctionType, property)):
                 wrapped = wrap_globals(attr, module)
