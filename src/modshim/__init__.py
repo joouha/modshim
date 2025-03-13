@@ -63,8 +63,7 @@ class MergedModule(ModuleType):
         Returns:
             The attribute value from upper module if it exists, otherwise from lower
         """
-        log.debug("Getting attribute '%s' from module '%s' (upper=%s, lower=%s)", 
-                 name, self.__name__, self._upper.__name__, self._lower.__name__)
+        log.debug("Getting attribute '%s' from module '%s'", name, self)
         try:
             return super().__getattr__(name)
         except AttributeError:
@@ -317,10 +316,7 @@ class MergedModuleLoader(Loader):
                     log.debug("Executed lower '%s'", module._lower.__spec__.name)
 
             # Copy attributes from lower first
-            log.debug("Copying attributes from lower module %s to %s",
-                     module._lower.__name__, module.__name__)
             for name, value in dict(vars(module._lower)).items():
-                log.debug("Processing lower attribute: %s = %r", name, value)
                 if not name.startswith("__"):
                     if (
                         hasattr(value, "__module__")
@@ -331,10 +327,7 @@ class MergedModuleLoader(Loader):
                     setattr(module, name, value)
 
             # Then overlay upper module attributes
-            log.debug("Copying attributes from upper module %s to %s",
-                     module._upper.__name__, module.__name__)
             for name, value in dict(vars(module._upper)).items():
-                log.debug("Processing upper attribute: %s = %r", name, value)
                 if not name.startswith("__"):
                     if (
                         hasattr(value, "__module__")
@@ -355,7 +348,6 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
     Returns:
         Wrapped object with updated globals
     """
-    log.debug("Wrapping globals for %r from module %s", value, module.__name__)
     if isinstance(value, FunctionType):
         # Wrap standalone functions
         wrapped = FunctionType(
@@ -385,9 +377,10 @@ def wrap_globals(value: Any, module: ModuleType) -> Any:
 
     elif isinstance(value, type):
         # For classes, only wrap their methods
-        for name, func in inspect.getmembers(value, predicate=inspect.isfunction):
-            wrapped = wrap_globals(func, module)
-            setattr(value, name, wrapped)
+        for name, attr in inspect.getmembers(value):
+            if isinstance(attr, (FunctionType, property)):
+                wrapped = wrap_globals(attr, module)
+                setattr(value, name, wrapped)
         return value
 
     else:
