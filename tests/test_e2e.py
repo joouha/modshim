@@ -47,28 +47,28 @@ def test_json_metadata_override() -> None:
     assert json.loads(original_result) == {"name": "test"}
 
 
-def test_datetime_weekend_override() -> None:
+def test_datetime_custom_override() -> None:
     """Test that datetime can be extended with new properties while preserving original."""
     shim(
         lower="datetime",
-        upper="tests.examples.datetime_weekend",
-        mount="datetime_weekend",
+        upper="tests.examples.datetime_custom",
+        mount="datetime_custom",
     )
     from datetime import datetime
 
-    from datetime_weekend import (  # type: ignore [reportMissingImports]
-        datetime as datetime_weekend,
+    from datetime_custom import (  # type: ignore [reportMissingImports]
+        datetime as datetime_custom,
     )
 
     # Test custom property
-    dt = datetime_weekend(2024, 1, 6)  # Saturday
+    dt = datetime_custom(2024, 1, 6)  # Saturday
     assert dt.is_weekend is True
 
-    dt = datetime_weekend(2024, 1, 3)  # Wednesday
+    dt = datetime_custom(2024, 1, 3)  # Wednesday
     assert dt.is_weekend is False
 
     # Test overridden class method
-    assert datetime_weekend.now().is_weekend is True
+    assert datetime_custom.now().is_weekend is True
 
     # Original datetime should be unaffected
     assert isinstance(datetime.now(), datetime)
@@ -312,28 +312,28 @@ def test_json_metadata_override_overmount() -> None:
     assert json.loads(original_result) == {"name": "test"}
 
 
-def test_datetime_weekend_override_overmount() -> None:
+def test_datetime_custom_override_overmount() -> None:
     """Test that datetime can be extended with new properties while preserving original."""
     shim(
         lower="datetime",
-        upper="tests.examples.datetime_weekend",
-        mount="tests.examples.datetime_weekend",
+        upper="tests.examples.datetime_custom",
+        mount="tests.examples.datetime_custom",
     )
     from datetime import datetime
 
-    from tests.examples.datetime_weekend import (  # type: ignore [reportMissingImports]
-        datetime as datetime_weekend,
+    from tests.examples.datetime_custom import (  # type: ignore [reportMissingImports]
+        datetime as datetime_custom,
     )
 
     # Test custom property
-    dt = datetime_weekend(2024, 1, 6)  # Saturday
+    dt = datetime_custom(2024, 1, 6)  # Saturday
     assert dt.is_weekend is True
 
-    dt = datetime_weekend(2024, 1, 3)  # Wednesday
+    dt = datetime_custom(2024, 1, 3)  # Wednesday
     assert dt.is_weekend is False
 
     # Test overridden class method
-    assert datetime_weekend.now().is_weekend is True
+    assert datetime_custom.now().is_weekend is True
 
     # Original datetime should be unaffected
     assert isinstance(datetime.now(), datetime)
