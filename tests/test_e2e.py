@@ -70,6 +70,10 @@ def test_datetime_custom_override() -> None:
     # Test overridden class method
     assert datetime_custom.now().is_weekend is True
 
+    # Test MAXDATE modification
+    with pytest.raises(ValueError, match="year must be in 1..3000"):
+        datetime_custom(9999, 1, 1).is_weekend
+
     # Original datetime should be unaffected
     assert isinstance(datetime.now(), datetime)
     assert not hasattr(datetime.now(), "is_weekend")
@@ -334,6 +338,10 @@ def test_datetime_custom_override_overmount() -> None:
 
     # Test overridden class method
     assert datetime_custom.now().is_weekend is True
+
+    # Test MAXDATE modification
+    with pytest.raises(ValueError, match="year must be in 1..3000"):
+        datetime_custom(9999, 1, 1).is_weekend
 
     # Original datetime should be unaffected
     assert isinstance(datetime.now(), datetime)
