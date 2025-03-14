@@ -134,10 +134,10 @@ def test_pathlib_is_empty() -> None:
         nonempty_file.write_text("content")
 
         # Test is_empty() method
-        assert empty_dir.is_empty() is True
-        assert nonempty_dir.is_empty() is False
-        assert empty_file.is_empty() is True
-        assert nonempty_file.is_empty() is False
+        assert empty_dir.is_empty is True
+        assert nonempty_dir.is_empty is False
+        assert empty_file.is_empty is True
+        assert nonempty_file.is_empty is False
 
         # Original Path should be unaffected
         assert not hasattr(Path(tmpdir), "is_empty")
@@ -407,10 +407,10 @@ def test_pathlib_is_empty_overmount() -> None:
         nonempty_file.write_text("content")
 
         # Test is_empty() method
-        assert empty_dir.is_empty() is True
-        assert nonempty_dir.is_empty() is False
-        assert empty_file.is_empty() is True
-        assert nonempty_file.is_empty() is False
+        assert empty_dir.is_empty is True
+        assert nonempty_dir.is_empty is False
+        assert empty_file.is_empty is True
+        assert nonempty_file.is_empty is False
 
         # Original Path should be unaffected
         assert not hasattr(Path(tmpdir), "is_empty")
