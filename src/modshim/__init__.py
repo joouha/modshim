@@ -358,22 +358,21 @@ class MergedModuleLoader(Loader):
             # Replace globals on any attributes from lower
             for name, value in dict(vars(module)).items():
                 if hasattr(value, "__module__") and value.__module__ == self.lower_name:
-                    value = wrap_globals(value, module.__dict__)
+                    value = patch_globals(value, module.__dict__)
                     setattr(module, name, value)
 
 
-def wrap_globals(value: Any, new_globals: dict[str, Any]) -> Any:
-    """Wrap an object's globals to use the provided globals dictionary.
+def patch_globals(value: Any, new_globals: dict[str, Any]) -> Any:
+    """Replace an object's function globals to use the provided globals dictionary.
 
     Args:
-        value: Object to wrap
+        value: Object to patch
         new_globals: Dictionary of globals to use
 
     Returns:
-        Wrapped object with updated globals
+        Object with updated function globals
     """
     if isinstance(value, FunctionType):
-        # Wrap standalone functions or methods
         wrapped = FunctionType(
             value.__code__,
             {**value.__globals__, **new_globals},
@@ -382,37 +381,38 @@ def wrap_globals(value: Any, new_globals: dict[str, Any]) -> Any:
             value.__closure__,
         )
         wrapped.__kwdefaults__ = value.__kwdefaults__
-        wrapped.__module__ = new_globals.get('__name__', value.__module__)
+        wrapped.__module__ = new_globals.get("__name__", value.__module__)
         return wrapped
 
     elif isinstance(value, MethodType):
         # Wrap methods
-        wrapped_func = wrap_globals(value.__func__, module)
+        wrapped_func = patch_globals(value.__func__, new_globals)
         return MethodType(wrapped_func, value.__self__)
 
     elif isinstance(value, property):
         # Handle properties
         return property(
-            fget=wrap_globals(value.fget, new_globals) if value.fget else None,
-            fset=wrap_globals(value.fset, new_globals) if value.fset else None,
-            fdel=wrap_globals(value.fdel, new_globals) if value.fdel else None,
+            fget=patch_globals(value.fget, new_globals) if value.fget else None,
+            fset=patch_globals(value.fset, new_globals) if value.fset else None,
+            fdel=patch_globals(value.fdel, new_globals) if value.fdel else None,
             doc=value.__doc__,
         )
 
     elif isinstance(value, type):
+        # Exclude subclasses of this class from the new globals in case they were
+        # overridden in the overlay - we don't want to replace reference to a class in
+        # it's methods with references to a subclass
+        new_globals = {
+            k: v
+            for k, v in new_globals.items()
+            if not isinstance(v, type) or not issubclass(v, value)
+        }
         # For classes, only wrap their methods
         for name, attr in inspect.getmembers(value):
-            # if (value.__name__ == "Path" and name == "__new__") or (
-            #     value.__name__ == "PathBase" and name == "__init__"
-            # ):
-            #     print(value.__name__)
-            #     print(attr.__globals__.keys())
-            #     wrapped = wrap_globals(attr, module)
-            #     print(wrapped.__globals__.keys())
-            #     setattr(value, name, wrapped)
-            #     continue
-            if isinstance(attr, (FunctionType, property)):
-                wrapped = wrap_globals(attr, new_globals)
+            # Check method is defined here to prevent wrapping inherited methods if
+            # also processing subclasses
+            if isinstance(attr, (FunctionType, property)) and name in value.__dict__:
+                wrapped = patch_globals(attr, new_globals)
                 setattr(value, name, wrapped)
         return value
 
@@ -420,7 +420,7 @@ def wrap_globals(value: Any, new_globals: dict[str, Any]) -> Any:
         # For other objects, wrap any bound methods
         for name, method in inspect.getmembers(value, predicate=inspect.ismethod):
             if hasattr(method.__func__, "__code__"):  # Only wrap real methods
-                wrapped = wrap_globals(method.__func__, new_globals)
+                wrapped = patch_globals(method.__func__, new_globals)
                 try:
                     setattr(value, name, MethodType(wrapped, value))
                 except AttributeError:
