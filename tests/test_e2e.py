@@ -50,7 +50,7 @@ def test_json_metadata_override() -> None:
 def test_datetime_custom_override() -> None:
     """Test that datetime can be extended with new properties while preserving original."""
     shim(
-        lower="datetime",
+        lower="_pydatetime",
         upper="tests.examples.datetime_custom",
         mount="datetime_custom",
     )
@@ -72,7 +72,7 @@ def test_datetime_custom_override() -> None:
 
     # Test MAXDATE modification
     with pytest.raises(ValueError, match="year must be in 1..3000"):
-        datetime_custom(9999, 1, 1).is_weekend
+        datetime_custom(9999, 1, 1)
 
     # Original datetime should be unaffected
     assert isinstance(datetime.now(), datetime)
@@ -319,7 +319,7 @@ def test_json_metadata_override_overmount() -> None:
 def test_datetime_custom_override_overmount() -> None:
     """Test that datetime can be extended with new properties while preserving original."""
     shim(
-        lower="datetime",
+        lower="_pydatetime",
         upper="tests.examples.datetime_custom",
         mount="tests.examples.datetime_custom",
     )
@@ -341,7 +341,7 @@ def test_datetime_custom_override_overmount() -> None:
 
     # Test MAXDATE modification
     with pytest.raises(ValueError, match="year must be in 1..3000"):
-        datetime_custom(9999, 1, 1).is_weekend
+        datetime_custom(9999, 1, 1)
 
     # Original datetime should be unaffected
     assert isinstance(datetime.now(), datetime)

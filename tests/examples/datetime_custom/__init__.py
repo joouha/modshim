@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime as OriginalDateTime
-from datetime import tzinfo
+from typing import TYPE_CHECKING
+
+from _pydatetime import datetime as OriginalDateTime
+
+if TYPE_CHECKING:
+    from datetime import tzinfo
+
+MAXYEAR = 3000
 
 
 class datetime(OriginalDateTime):
