@@ -123,6 +123,14 @@ class MergedModuleLoader(Loader):
             if key in self.finder.cache:
                 return self.finder.cache[key]
 
+        # Create a copy of the lower module
+        lower_spec = find_spec(self.lower_name)
+        log.debug("Using lower spec %s for '%s'", lower_spec, self.lower_name)
+        if lower_spec is None:
+            raise ImportError(f"No module named '{self.lower_name}'")
+
+        lower_module = module_from_spec(lower_spec)
+
         # Import upper module
         try:
             with MergedModuleFinder._meta_path_lock:
@@ -143,15 +151,14 @@ class MergedModuleLoader(Loader):
             # Restore the finder
             with MergedModuleFinder._meta_path_lock:
                 sys.meta_path.insert(0, self.finder)
-        upper_module.__package__ = self.finder.upper_name
 
-        # Create a copy of the lower module
-        lower_spec = find_spec(self.lower_name)
-        log.debug("Using lower spec %s for '%s'", lower_spec, self.lower_name)
-        if lower_spec is None:
-            raise ImportError(f"No module named '{self.lower_name}'")
-
-        lower_module = module_from_spec(lower_spec)
+        # Set upper module package name by modifying lower module package name
+        upper_module.__package__ = (
+            self.finder.upper_name
+            + lower_module.__package__[len(self.finder.lower_name) :]
+            if lower_module.__package__
+            else None
+        )
 
         # Create merged module
         merged = MergedModule(spec.name, upper_module, lower_module, self.finder)
@@ -201,7 +208,23 @@ class MergedModuleLoader(Loader):
 
         # Resolve relative imports from the lower module
         if level and from_layer:
-            # AI! Implement code which resolves relative imports to absolute imports
+            if not caller_package:
+                raise ImportError("Relative import with no known parent package")
+
+            package_parts = caller_package.split(".")
+            if len(package_parts) < level:
+                raise ImportError("Attempted relative import beyond top package")
+
+            # For level=1, use whole package (current directory)
+            if level == 1:
+                base_package = caller_package
+            # For level>1, remove (level-1) parts to go up that many directories
+            else:
+                base_package = ".".join(package_parts[: -level + 1])
+
+            # Construct absolute name
+            name = f"{base_package}.{name}" if name else base_package
+            level = 0  # Reset level since we've made it absolute
 
             log.debug(
                 "Resolved relative import '%s' by '%s' to '%s'",
