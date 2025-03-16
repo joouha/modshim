@@ -191,38 +191,30 @@ class MergedModuleLoader(Loader):
             caller_module,
             caller_package,
         )
-        # Resolve relative imports from the lower module
-        if level and (
-            caller_package == self.finder.lower_name
-            or caller_package.startswith(self.finder.lower_name + ".")
-        ):
-            # Calculate the absolute names
-            name = (
-                ".".join(
-                    caller_package.split(".")[: -level + 1] + ([name] if name else [])
-                )
-                if level > 1
-                else caller_package + ("." + name if name else "")
-            )
-            # Reset the level, as name is now resolved
-            level = 0
-            log.debug("Resolved relative import '%s' to '%s'", original_name, name)
+        # Check if we're in the upper or lower module importing from within the lower module
+        from_layer = caller_module in {
+            self.finder.lower_name,
+            self.finder.upper_name,
+        } or caller_module.startswith(
+            (self.finder.lower_name + ".", self.finder.upper_name + ".")
+        )
 
-        # Check if we're in the lower module importing from within the lower module
-        replace = (
-            (
-                caller_package == self.finder.lower_name
-                or caller_module.startswith(self.finder.lower_name + ".")
+        # Resolve relative imports from the lower module
+        if level and from_layer:
+            # AI! Implement code which resolves relative imports to absolute imports
+
+            log.debug(
+                "Resolved relative import '%s' by '%s' to '%s'",
+                original_name,
+                caller_package,
+                name,
             )
-            or (
-                caller_package == self.finder.upper_name
-                or caller_module.startswith(self.finder.upper_name + ".")
-            )
-        ) and (
+
+        replace = from_layer and (
             name == self.finder.lower_name
             or name.startswith(self.finder.lower_name + ".")
         )
-
+        # if level > 0:
         if replace:
             # name = name.replace(self.finder.lower_name, self.finder.merged_name, 1)
             name = name.replace(self.finder.lower_name, self.finder.merged_name, 1)
