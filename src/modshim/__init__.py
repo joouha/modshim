@@ -65,19 +65,35 @@ class MergedModule(ModuleType):
         """
         log.debug("Getting attribute '%s' from module '%s'", name, self.__name__)
         try:
-            return super().__getattr__(name)
+            result = super().__getattr__(name)
         except AttributeError:
             pass
+
+        # Check if this is a submodule that might be partially initialized
+        full_submodule_name = f"{self.__name__}.{name}"
+        if full_submodule_name in sys.modules:
+            log.debug("Found partially initialized module '%s'", full_submodule_name)
+            return sys.modules[full_submodule_name]
+
         # Check upper module
         try:
-            return getattr(self._upper, name)
+            result = getattr(self._upper, name)
         except AttributeError:
             pass
         # Then check lower module
         try:
-            return getattr(self._lower, name)
+            result = getattr(self._lower, name)
         except AttributeError:
+            log.debug("No attribute '%s'", name)
+            log.debug("%s %s %s", self, self._lower, self._upper)
+            log.debug(dir(self))
+            log.debug(dir(self._lower))
+            log.debug(dir(self._upper))
             raise
+        log.debug(
+            "Got attribute '%s' from module '%s': %s", name, self.__name__, result
+        )
+        return result
 
 
 class MergedModuleLoader(Loader):
@@ -116,6 +132,10 @@ class MergedModuleLoader(Loader):
         Returns:
             A new merged module combining upper and lower modules
         """
+        # if spec.name == "ptk.completion.CompleteEvent":
+        #     import traceback
+
+        #     print("".join(traceback.format_stack()))
         log.debug("Creating module for spec: %r", spec)
         # If already merged, return from cache
         with self.finder._cache_lock:
@@ -128,7 +148,6 @@ class MergedModuleLoader(Loader):
         log.debug("Using lower spec %s for '%s'", lower_spec, self.lower_name)
         if lower_spec is None:
             raise ImportError(f"No module named '{self.lower_name}'")
-
         lower_module = module_from_spec(lower_spec)
 
         # Import upper module
@@ -251,8 +270,16 @@ class MergedModuleLoader(Loader):
                 if key in self.finder.cache:
                     return self.finder.cache[key]._lower
 
-        # Perform the import using the original builtin import function:w
+        # Perform the import using the original builtin import function
+        log.debug(
+            "Performing native import of '%s' (fromlist: %s, level: %s)",
+            name,
+            fromlist,
+            level,
+        )
         result = _original_import(name, globals, locals, fromlist, level)
+
+        log.debug({x: hasattr(result, x) for x in fromlist or []})
 
         # For relative imports, add the module to the caller's namespace
         if original_name and original_level:
@@ -336,6 +363,8 @@ class MergedModuleLoader(Loader):
             self.upper_name,
             self.lower_name,
         )
+
+        # module_dict = module.__dict__
 
         # Use global lock for entire module execution
         with self._global_import_lock:
