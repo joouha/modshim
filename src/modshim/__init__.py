@@ -54,6 +54,12 @@ class MergedModule(ModuleType):
         self._lower = lower_module
         self._finder = finder
 
+        for attr in ("__package__", "__path__", "__file__", "__cached__"):
+            try:
+                setattr(self, attr, getattr(self._lower, attr, None))
+            except AttributeError:
+                pass
+
     def __getattr__(self, name: str) -> Any:
         """Get an attribute from either upper or lower module.
 
@@ -85,11 +91,8 @@ class MergedModule(ModuleType):
             result = getattr(self._lower, name)
         except AttributeError:
             log.debug("No attribute '%s'", name)
-            log.debug("%s %s %s", self, self._lower, self._upper)
-            log.debug(dir(self))
-            log.debug(dir(self._lower))
-            log.debug(dir(self._upper))
             raise
+
         log.debug(
             "Got attribute '%s' from module '%s': %s", name, self.__name__, result
         )
@@ -132,10 +135,6 @@ class MergedModuleLoader(Loader):
         Returns:
             A new merged module combining upper and lower modules
         """
-        # if spec.name == "ptk.completion.CompleteEvent":
-        #     import traceback
-
-        #     print("".join(traceback.format_stack()))
         log.debug("Creating module for spec: %r", spec)
         # If already merged, return from cache
         with self.finder._cache_lock:
@@ -279,8 +278,6 @@ class MergedModuleLoader(Loader):
         )
         result = _original_import(name, globals, locals, fromlist, level)
 
-        log.debug({x: hasattr(result, x) for x in fromlist or []})
-
         # For relative imports, add the module to the caller's namespace
         if original_name and original_level:
             local_name = name.split(".")[-1]
@@ -364,16 +361,17 @@ class MergedModuleLoader(Loader):
             self.lower_name,
         )
 
-        # module_dict = module.__dict__
-
         # Use global lock for entire module execution
         with self._global_import_lock:
+            sys.modules[self.lower_name] = module._lower
             # Execute lower module with our import hook active if it has a loader
             if module._lower.__spec__ and module._lower.__spec__.loader:
                 log.debug("Executing lower '%s'", module._lower.__spec__.name)
                 with self.hook_imports():
                     module._lower.__spec__.loader.exec_module(module._lower)
                 log.debug("Executed lower '%s'", module._lower.__spec__.name)
+
+            del sys.modules[self.lower_name]
 
             # Copy attributes from lower first
             module.__dict__.update(
