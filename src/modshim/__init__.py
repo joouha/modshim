@@ -361,30 +361,40 @@ class MergedModuleLoader(Loader):
 
         # Use global lock for entire module execution
         with self._global_import_lock:
+            # Replace whatever was in sys.module for the lower module with our copy
+            sys_mod_lower_prev = sys.modules.get(self.lower_name)
             sys.modules[self.lower_name] = module._lower
-            # Execute lower module with our import hook active if it has a loader
-            if module._lower.__spec__ and module._lower.__spec__.loader:
-                log.debug("Executing lower '%s'", module._lower.__spec__.name)
-                with self.hook_imports():
-                    module._lower.__spec__.loader.exec_module(module._lower)
-                log.debug("Executed lower '%s'", module._lower.__spec__.name)
 
-            del sys.modules[self.lower_name]
+            try:
+                # Execute lower module with our import hook active if it has a loader
+                if module._lower.__spec__ and module._lower.__spec__.loader:
+                    log.debug("Executing lower '%s'", module._lower.__spec__.name)
+                    with self.hook_imports():
+                        module._lower.__spec__.loader.exec_module(module._lower)
+                    log.debug("Executed lower '%s'", module._lower.__spec__.name)
 
-            # Copy attributes from lower first
-            module.__dict__.update(
-                {
-                    k: v
-                    for k, v in module._lower.__dict__.items()
-                    if not k.startswith("__")
-                }
-            )
+                # Copy attributes from lower first
+                module.__dict__.update(
+                    {
+                        k: v
+                        for k, v in module._lower.__dict__.items()
+                        if not k.startswith("__")
+                    }
+                )
 
-            # Execute upper module without import hook
-            if module._upper.__spec__ and module._upper.__spec__.loader:
-                log.debug("Executing upper '%s'", module._upper.__spec__.name)
-                module._upper.__spec__.loader.exec_module(module._upper)
-                log.debug("Executed upper '%s'", module._upper.__spec__.name)
+                # Execute upper module without import hook
+                if module._upper.__spec__ and module._upper.__spec__.loader:
+                    log.debug("Executing upper '%s'", module._upper.__spec__.name)
+                    module._upper.__spec__.loader.exec_module(module._upper)
+                    log.debug("Executed upper '%s'", module._upper.__spec__.name)
+
+            finally:
+                # Remove lower (our copy with hooked imports) from sys.modules
+                # and restore what was there before
+                if sys_mod_lower_prev is None:
+                    del sys.modules[self.lower_name]
+                else:
+                    sys.modules[self.lower_name] = sys_mod_lower_prev
 
             # Copy attributes from upper
             module.__dict__.update(
