@@ -223,11 +223,6 @@ def test_module_reload() -> None:
     assert reloaded is merged  # Same module object
     assert merged.get_count() == 2  # Count increased after reload
 
-    # Clean up
-    del sys.modules["test_upper"]
-    del sys.modules["test_lower"]
-    del sys.modules["test_merged"]
-
 
 def test_package_paths() -> None:
     """Test that __path__ and package attributes are handled correctly."""
