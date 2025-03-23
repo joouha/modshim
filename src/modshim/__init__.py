@@ -134,7 +134,7 @@ def _load_combined_module(
             upper_spec = find_spec(upper_module)
             if upper_spec and upper_spec.origin:
                 upper_code = get_module_code(upper_spec.origin)
-                upper_code = rewrite_module_code(upper_code, upper_module, mount_point)
+                upper_code = rewrite_module_code(upper_code, lower_module, mount_point)
                 # Execute the upper module code
                 exec(
                     f"# Code from {upper_module}\n{upper_code}", target_module.__dict__
