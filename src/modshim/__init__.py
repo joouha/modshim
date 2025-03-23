@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import sys
+from importlib import import_module
 from importlib.abc import InspectLoader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import find_spec
@@ -305,7 +306,7 @@ class ModShimFinder(MetaPathFinder):
         return spec
 
 
-def shim(lower: str, upper: str | None = None, mount: str | None = None) -> ModuleType:
+def shim(lower: str, upper: str | None = None, mount: str | None = None) -> None:
     """Mount an upper module or package on top of a lower module or package.
 
     This function sets up import machinery to dynamically combine modules
@@ -324,35 +325,5 @@ def shim(lower: str, upper: str | None = None, mount: str | None = None) -> Modu
     if not any(isinstance(finder, ModShimFinder) for finder in sys.meta_path):
         sys.meta_path.insert(0, ModShimFinder())
 
-    # Create a new module for the mount point
-    module = ModuleType(mount)
-    module.__file__ = f"<{mount}>"
-
-    # Check if either module is a package
-    upper_spec = find_spec(upper)
-    lower_spec = find_spec(lower)
-
-    if not upper_spec:
-        raise ImportError(f"Could not find upper module/package: {upper}")
-    if not lower_spec:
-        raise ImportError(f"Could not find lower module/package: {lower}")
-
-    # If either is a package, set up package attributes
-    upper_is_package = upper_spec.submodule_search_locations is not None
-    lower_is_package = lower_spec.submodule_search_locations is not None
-
-    if upper_is_package or lower_is_package:
-        module.__path__ = []  # Required for packages
-        module.__package__ = mount
-
     # Register the mapping for this mount point
     ModShimFinder.register_mapping(mount, upper, lower)
-
-    # Register the module in sys.modules
-    sys.modules[mount] = module
-
-    # If this is not a package, load the module content immediately
-    if not (upper_is_package or lower_is_package):
-        _load_combined_module(upper, lower, module)
-
-    return module
