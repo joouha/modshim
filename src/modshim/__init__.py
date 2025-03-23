@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 import sys
-from importlib.abc import MetaPathFinder
+from importlib.abc import InspectLoader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import find_spec
 from types import ModuleType
@@ -71,17 +71,24 @@ class ImportRewriter(ast.NodeTransformer):
         return node
 
 
-def get_module_code(module_path: str | Path) -> str:
-    """Get the source code of a module.
+def get_module_source(module_name: str, spec) -> str | None:
+    """Get the source code of a module using its loader.
 
     Args:
-        module_path: Path to the module file
+        module_name: Name of the module
+        spec: The module's spec
 
     Returns:
-        The source code of the module
+        The source code of the module or None if not available
     """
-    with open(module_path) as f:
-        return f.read()
+    if not spec or not spec.loader or not isinstance(spec.loader, InspectLoader):
+        return None
+    
+    try:
+        # Try to get the source directly
+        return spec.loader.get_source(module_name)
+    except (ImportError, AttributeError):
+        return None
 
 
 def rewrite_module_code(code: str, original_module_name: str, mount_point: str) -> str:
@@ -118,13 +125,25 @@ def _load_combined_module(
     if lower_module:
         try:
             lower_spec = find_spec(lower_module)
-            if lower_spec and lower_spec.origin:
-                lower_code = get_module_code(lower_spec.origin)
-                lower_code = rewrite_module_code(lower_code, lower_module, mount_point)
-                # Execute the lower module code
-                exec(
-                    f"# Code from {lower_module}\n{lower_code}", target_module.__dict__
-                )
+            if lower_spec:
+                # First try to get the source code
+                lower_source = get_module_source(lower_module, lower_spec)
+                
+                if lower_source:
+                    # Rewrite imports and execute
+                    lower_source = rewrite_module_code(lower_source, lower_module, mount_point)
+                    exec(
+                        f"# Code from {lower_module}\n{lower_source}", 
+                        target_module.__dict__
+                    )
+                elif lower_spec.loader and isinstance(lower_spec.loader, InspectLoader):
+                    # Fall back to compiled code if source is not available
+                    try:
+                        lower_code = lower_spec.loader.get_code(lower_module)
+                        if lower_code:
+                            exec(lower_code, target_module.__dict__)
+                    except (ImportError, AttributeError):
+                        pass
         except (ImportError, FileNotFoundError):
             pass
 
@@ -132,13 +151,25 @@ def _load_combined_module(
     if upper_module:
         try:
             upper_spec = find_spec(upper_module)
-            if upper_spec and upper_spec.origin:
-                upper_code = get_module_code(upper_spec.origin)
-                upper_code = rewrite_module_code(upper_code, lower_module, mount_point)
-                # Execute the upper module code
-                exec(
-                    f"# Code from {upper_module}\n{upper_code}", target_module.__dict__
-                )
+            if upper_spec:
+                # First try to get the source code
+                upper_source = get_module_source(upper_module, upper_spec)
+                
+                if upper_source:
+                    # Rewrite imports and execute
+                    upper_source = rewrite_module_code(upper_source, upper_module, mount_point)
+                    exec(
+                        f"# Code from {upper_module}\n{upper_source}", 
+                        target_module.__dict__
+                    )
+                elif upper_spec.loader and isinstance(upper_spec.loader, InspectLoader):
+                    # Fall back to compiled code if source is not available
+                    try:
+                        upper_code = upper_spec.loader.get_code(upper_module)
+                        if upper_code:
+                            exec(upper_code, target_module.__dict__)
+                    except (ImportError, AttributeError):
+                        pass
         except (ImportError, FileNotFoundError):
             pass
 
@@ -215,12 +246,18 @@ class ModShimFinder(MetaPathFinder):
         # Check if this is a direct mount point
         if fullname in self._mappings:
             upper_module, lower_module = self._mappings[fullname]
-            return self._create_spec(fullname, upper_module, lower_module)
+            # Prevent recursion when mount point is the same as one of the source modules
+            if fullname != upper_module and fullname != lower_module:
+                return self._create_spec(fullname, upper_module, lower_module)
 
         # Check if this is a submodule of a mount point
         for mount_point, (upper_module, lower_module) in self._mappings.items():
             if fullname.startswith(f"{mount_point}."):
-                return self._create_spec(fullname, upper_module, lower_module)
+                # Prevent recursion when trying to import a submodule that matches
+                # the pattern of the source modules
+                if not (fullname.startswith(f"{upper_module}.") or 
+                        fullname.startswith(f"{lower_module}.")):
+                    return self._create_spec(fullname, upper_module, lower_module)
 
         return None
 
