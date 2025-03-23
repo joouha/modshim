@@ -12,16 +12,13 @@ from importlib.abc import InspectLoader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import find_spec
 from types import ModuleType
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from typing import ClassVar
 
 
 class ImportRewriter(ast.NodeTransformer):
     """AST transformer that rewrites imports to point to the mount point."""
 
-    def __init__(self, original_module_name: str, mount_point: str):
+    def __init__(self, original_module_name: str, mount_point: str) -> None:
         """Initialize the rewriter.
 
         Args:
@@ -71,7 +68,7 @@ class ImportRewriter(ast.NodeTransformer):
         return node
 
 
-def get_module_source(module_name: str, spec) -> str | None:
+def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
     """Get the source code of a module using its loader.
 
     Args:
@@ -83,7 +80,7 @@ def get_module_source(module_name: str, spec) -> str | None:
     """
     if not spec or not spec.loader or not isinstance(spec.loader, InspectLoader):
         return None
-    
+
     try:
         # Try to get the source directly
         return spec.loader.get_source(module_name)
@@ -128,13 +125,15 @@ def _load_combined_module(
             if lower_spec:
                 # First try to get the source code
                 lower_source = get_module_source(lower_module, lower_spec)
-                
+
                 if lower_source:
                     # Rewrite imports and execute
-                    lower_source = rewrite_module_code(lower_source, lower_module, mount_point)
+                    lower_source = rewrite_module_code(
+                        lower_source, lower_module, mount_point
+                    )
                     exec(
-                        f"# Code from {lower_module}\n{lower_source}", 
-                        target_module.__dict__
+                        f"# Code from {lower_module}\n{lower_source}",
+                        target_module.__dict__,
                     )
                 elif lower_spec.loader and isinstance(lower_spec.loader, InspectLoader):
                     # Fall back to compiled code if source is not available
@@ -154,13 +153,15 @@ def _load_combined_module(
             if upper_spec:
                 # First try to get the source code
                 upper_source = get_module_source(upper_module, upper_spec)
-                
+
                 if upper_source:
                     # Rewrite imports and execute
-                    upper_source = rewrite_module_code(upper_source, upper_module, mount_point)
+                    upper_source = rewrite_module_code(
+                        upper_source, lower_module, mount_point
+                    )
                     exec(
-                        f"# Code from {upper_module}\n{upper_source}", 
-                        target_module.__dict__
+                        f"# Code from {upper_module}\n{upper_source}",
+                        target_module.__dict__,
                     )
                 elif upper_spec.loader and isinstance(upper_spec.loader, InspectLoader):
                     # Fall back to compiled code if source is not available
@@ -192,7 +193,7 @@ class ModShimLoader:
         module = ModuleType(spec.name)
         module.__file__ = f"<{spec.name}>"
         module.__loader__ = self
-        module.__package__ = spec.name.rpartition(".")[0]
+        module.__package__ = spec.parent
 
         # If this is a package, set up package attributes
         if spec.submodule_search_locations is not None:
@@ -221,7 +222,7 @@ class ModShimFinder(MetaPathFinder):
     """Finder for shimmed modules."""
 
     # Dictionary mapping mount points to (upper_module, lower_module) tuples
-    _mappings: dict[str, tuple[str, str]] = {}
+    _mappings: ClassVar[dict[str, tuple[str, str]]] = {}
 
     @classmethod
     def register_mapping(
@@ -252,12 +253,12 @@ class ModShimFinder(MetaPathFinder):
 
         # Check if this is a submodule of a mount point
         for mount_point, (upper_module, lower_module) in self._mappings.items():
-            if fullname.startswith(f"{mount_point}."):
+            if fullname.startswith(f"{mount_point}.") and not (
+                fullname.startswith((f"{upper_module}.", f"{lower_module}."))
+            ):
                 # Prevent recursion when trying to import a submodule that matches
                 # the pattern of the source modules
-                if not (fullname.startswith(f"{upper_module}.") or 
-                        fullname.startswith(f"{lower_module}.")):
-                    return self._create_spec(fullname, upper_module, lower_module)
+                return self._create_spec(fullname, upper_module, lower_module)
 
         return None
 
