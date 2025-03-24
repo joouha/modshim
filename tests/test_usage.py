@@ -11,7 +11,7 @@ from typing import Callable
 
 import pytest
 
-from modshim import MergedModuleFinder, shim
+from modshim import shim
 
 
 class _TestModuleLoader(Loader):
@@ -38,33 +38,21 @@ class _TestModule(ModuleType):
 def test_multiple_registrations() -> None:
     """Test behavior when registering the same module multiple times."""
     # First registration
-    shim1 = shim(
-        upper="tests.examples.json_single_quotes", lower="json", mount="json_multiple"
-    )
-    result1 = shim1.dumps({"test": "value"})
+    shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_multiple")
+    import json_multiple
+    result1 = json_multiple.dumps({"test": "value"})
     assert result1 == "{'test': 'value'}"
 
     # Second registration with same names
-    shim2 = shim(
-        upper="tests.examples.json_single_quotes", lower="json", mount="json_multiple"
-    )
-    result2 = shim2.dumps({"test": "value"})
+    shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_multiple")
+    result2 = json_multiple.dumps({"test": "value"})
     assert result2 == "{'test': 'value'}"
 
-    # Verify both references point to same module
-    assert shim1 is shim2
-
     # Third registration with same module but different name
-    shim3 = shim(
-        upper="tests.examples.json_single_quotes",
-        lower="json",
-        mount="json_multiple_other",
-    )
-    result3 = shim3.dumps({"test": "value"})
+    shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_multiple_other")
+    import json_multiple_other
+    result3 = json_multiple_other.dumps({"test": "value"})
     assert result3 == "{'test': 'value'}"
-
-    # Verify this is a different module
-    assert shim3 is not shim1
 
 
 def test_concurrent_shims() -> None:
@@ -76,11 +64,11 @@ def test_concurrent_shims() -> None:
         lower = "json"
         mount = f"json_shim_{i}"
 
-        # Create shim
-        merged = shim(upper=upper, lower=lower, mount=mount)
+        shim(lower="json", upper="tests.examples.json_single_quotes", mount=mount)
 
-        # Use the shim to verify it works
-        result = merged.dumps({"test": "value"})
+        # Import and use the module
+        module = __import__(mount)
+        result = module.dumps({"test": "value"})
         assert isinstance(result, str)
         assert result == "{'test': 'value'}"
 
@@ -102,14 +90,11 @@ def test_concurrent_shims() -> None:
 def test_concurrent_access() -> None:
     """Test that multiple threads can safely access the same shim."""
     # Create a single shim first
-    merged = shim(
-        upper="tests.examples.json_single_quotes",
-        lower="json",
-        mount="json_shim_shared",
-    )
+    shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_shim_shared")
+    import json_shim_shared
 
     def use_shim() -> str:
-        result = merged.dumps({"test": "value"})
+        result = json_shim_shared.dumps({"test": "value"})
         assert isinstance(result, str)
         assert result == "{'test': 'value'}"
         time.sleep(0.001)  # Add delay to increase chance of race conditions
@@ -143,37 +128,32 @@ def test_error_handling() -> None:
     """Test error cases and edge conditions."""
     # Test with invalid lower module
     with pytest.raises(ImportError):
-        shim(
-            upper="tests.examples.json_single_quotes",
-            lower="nonexistent",
-            mount="json_error",
-        )
+        shim(lower="nonexistent", upper="tests.examples.json_single_quotes", mount="json_error")
 
     # Test with invalid module names
     with pytest.raises(ValueError, match="Upper module name cannot be empty"):
-        shim(upper="", lower="json", mount="json_error")
+        shim(lower="json", upper="", mount="json_error")
 
     # Test with empty lower module name
     with pytest.raises(ValueError, match="Lower module name cannot be empty"):
-        shim(upper="tests.examples.json_single_quotes", lower="", mount="json_error")
+        shim(lower="", upper="tests.examples.json_single_quotes", mount="json_error")
 
 
 def test_attribute_access() -> None:
     """Test various attribute access patterns on shimmed modules."""
-    merged = shim(
-        upper="tests.examples.json_single_quotes", lower="json", mount="json_attrs"
-    )
+    shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_attrs")
+    import json_attrs
 
     # Test accessing non-existent attribute
     with pytest.raises(AttributeError):
-        _ = merged.nonexistent_attribute
+        _ = json_attrs.nonexistent_attribute
 
     # Test accessing dunder attributes
-    assert hasattr(merged, "__name__")
-    assert merged.__name__ == "json_attrs"
+    assert hasattr(json_attrs, "__name__")
+    assert json_attrs.__name__ == "json_attrs"
 
     # Test dir() functionality
-    attrs = dir(merged)
+    attrs = dir(json_attrs)
     assert "dumps" in attrs
     assert "__name__" in attrs
 
@@ -239,37 +219,6 @@ def test_package_paths() -> None:
 
     assert hasattr(Path, "is_empty")
 
-
-def test_import_hook_cleanup() -> None:
-    """Test that import hooks are properly cleaned up."""
-    import sys
-
-    # Count initial meta_path entries
-    initial_meta_path_count = len(sys.meta_path)
-    initial_finders = [f for f in sys.meta_path if isinstance(f, MergedModuleFinder)]
-
-    # Create and remove several shims
-    shim1 = shim(
-        upper="tests.examples.json_single_quotes", lower="json", mount="json_cleanup1"
-    )
-    shim2 = shim(
-        upper="tests.examples.json_single_quotes", lower="json", mount="json_cleanup2"
-    )
-
-    # Force cleanup explicitly rather than relying on __del__
-    shim1._finder.cleanup()
-    shim2._finder.cleanup()
-
-    # Clean up modules
-    if "json_cleanup1" in sys.modules:
-        del sys.modules["json_cleanup1"]
-    if "json_cleanup2" in sys.modules:
-        del sys.modules["json_cleanup2"]
-
-    # Verify meta_path is cleaned up
-    current_finders = [f for f in sys.meta_path if isinstance(f, MergedModuleFinder)]
-    assert len(current_finders) == len(initial_finders)
-    assert len(sys.meta_path) == initial_meta_path_count
 
 
 def test_context_preservation() -> None:
