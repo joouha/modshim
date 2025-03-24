@@ -128,7 +128,7 @@ def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
 class ModShimLoader:
     """Loader for shimmed modules."""
 
-    def __init__(self, upper_module: str, lower_module: str, mount_root: str) -> None:
+    def __init__(self, upper_name: str, lower_name: str, mount_root: str) -> None:
         """Initialize the loader.
 
         Args:
@@ -136,16 +136,16 @@ class ModShimLoader:
             lower_module: The name of the lower module
             root_mount_point: The root mount point for import rewriting
         """
-        self.upper_module = upper_module
-        self.lower_module = lower_module
+        self.upper_name = upper_name
+        self.lower_name = lower_name
         self.mount_root = mount_root
         # Get the root package names from ModShimFinder._mappings
         if self.mount_root in ModShimFinder._mappings:
             self.upper_root, self.lower_root = ModShimFinder._mappings[self.mount_root]
         else:
             # This should never happen, but just in case
-            self.upper_root = upper_module
-            self.lower_root = lower_module
+            self.upper_root = upper_name
+            self.lower_root = lower_name
 
     def create_module(self, spec: ModuleSpec) -> ModuleType:
         """Create a new module object."""
@@ -180,18 +180,17 @@ class ModShimLoader:
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by combining upper and lower modules."""
-        upper_name = self.upper_module
-        lower_name = self.lower_module
+        upper_name = self.upper_name
+        lower_name = self.lower_name
 
         # For submodules, map the full import path
         if "." in module.__name__:
             suffix = module.__name__.split(".", 1)[1]
-            if self.upper_module:
-                upper_name = f"{self.upper_module}.{suffix}"
-            if self.lower_module:
-                lower_name = f"{self.lower_module}.{suffix}"
+            if self.upper_name:
+                upper_name = f"{self.upper_name}.{suffix}"
+            if self.lower_name:
+                lower_name = f"{self.lower_name}.{suffix}"
 
-        # Load and execute lower module first
         if lower_name:
             try:
                 lower_spec = find_spec(lower_name)
@@ -336,50 +335,58 @@ class ModShimFinder(MetaPathFinder):
         """Find a module spec for the given module name."""
         # Check if this is a direct mount point
         if fullname in self._mappings:
-            upper_module, lower_module = self._mappings[fullname]
+            upper_root, lower_root = self._mappings[fullname]
             # Prevent recursion when mount point is the same as one of the source modules
-            if fullname != upper_module and fullname != lower_module:
-                return self._create_spec(fullname, upper_module, lower_module, fullname)
+            if fullname != upper_root and fullname != lower_root:
+                return self._create_spec(fullname, upper_root, lower_root, fullname)
         # Check if this is a submodule of a mount point
-        for mount_point, (upper_module, lower_module) in self._mappings.items():
+        for mount_root, (upper_root, lower_root) in self._mappings.items():
             # Prevent recursion when trying to import a submodule that matches
             # the pattern of the source modules
-            if fullname.startswith(f"{mount_point}.") and not (
-                fullname.startswith((f"{upper_module}.", f"{lower_module}."))
+            if fullname.startswith(f"{mount_root}.") and not (
+                fullname.startswith((f"{upper_root}.", f"{lower_root}."))
             ):
-                return self._create_spec(
-                    fullname, upper_module, lower_module, mount_point
-                )
+                return self._create_spec(fullname, upper_root, lower_root, mount_root)
         return None
 
     def _create_spec(
-        self, fullname: str, upper_module: str, lower_module: str, root_mount_point: str
+        self, fullname: str, upper_root: str, lower_root: str, mount_root: str
     ) -> ModuleSpec:
         """Create a module spec for the given module name."""
-        loader = ModShimLoader(upper_module, lower_module, root_mount_point)
-        spec = ModuleSpec(fullname, loader)
+        # Calculate full lower and upper names
+        lower_name = fullname.replace(mount_root, lower_root)
+        upper_name = fullname.replace(mount_root, upper_root)
+        # Find upper and lower specs
+        try:
+            lower_spec = find_spec(lower_name)
+        except (ImportError, AttributeError):
+            lower_spec = None
+        try:
+            upper_spec = find_spec(upper_name)
+        except (ImportError, AttributeError):
+            upper_spec = None
+
+        loader = ModShimLoader(upper_root, lower_root, mount_root)
+        spec = ModuleSpec(
+            name=fullname,
+            loader=loader,
+            origin=None,
+            is_package=lower_spec.submodule_search_locations is not None,
+        )
 
         # Add lower module submodule search locations
-        try:
-            lower_spec = find_spec(lower_module)
-            if lower_spec and lower_spec.submodule_search_locations is not None:
-                spec.submodule_search_locations = [
-                    *(spec.submodule_search_locations or []),
-                    *list(lower_spec.submodule_search_locations),
-                ]
-        except (ImportError, AttributeError):
-            pass
+        if lower_spec and lower_spec.submodule_search_locations is not None:
+            spec.submodule_search_locations = [
+                *(spec.submodule_search_locations or []),
+                *list(lower_spec.submodule_search_locations),
+            ]
 
         # Add upper module submodule search locations
-        try:
-            upper_spec = find_spec(upper_module)
-            if upper_spec and upper_spec.submodule_search_locations is not None:
-                spec.submodule_search_locations = [
-                    *(spec.submodule_search_locations or []),
-                    *list(upper_spec.submodule_search_locations),
-                ]
-        except (ImportError, AttributeError):
-            pass
+        if upper_spec and upper_spec.submodule_search_locations is not None:
+            spec.submodule_search_locations = [
+                *(spec.submodule_search_locations or []),
+                *list(upper_spec.submodule_search_locations),
+            ]
 
         return spec
 
