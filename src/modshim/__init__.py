@@ -18,14 +18,14 @@ from typing import ClassVar
 class ImportRewriter(ast.NodeTransformer):
     """AST transformer that rewrites imports to point to the mount point."""
 
-    def __init__(self, original_module_name: str, mount_point: str) -> None:
+    def __init__(self, original_root_package: str, mount_point: str) -> None:
         """Initialize the rewriter.
 
         Args:
-            original_module_name: The name of the module being rewritten
+            original_root_package: The root package name of the module being rewritten
             mount_point: The name of the mount point module
         """
-        self.original_module_name = original_module_name
+        self.original_root_package = original_root_package
         self.mount_point = mount_point
         super().__init__()
 
@@ -33,18 +33,16 @@ class ImportRewriter(ast.NodeTransformer):
         """Rewrite 'from X import Y' statements."""
         # If this is an import from the original module or its submodules,
         # rewrite it to import from the mount point
-        print(node.module, self.original_module_name)
         if node.module and (
-            node.module == self.original_module_name
-            or node.module.startswith(f"{self.original_module_name}.")
+            node.module == self.original_root_package
+            or node.module.startswith(f"{self.original_root_package}.")
         ):
-            print(node.module)
             # Replace the original module name with the mount point
-            if node.module == self.original_module_name:
+            if node.module == self.original_root_package:
                 new_module = self.mount_point
             else:
                 # Handle submodule imports
-                suffix = node.module[len(self.original_module_name) :]
+                suffix = node.module[len(self.original_root_package) :]
                 new_module = f"{self.mount_point}{suffix}"
 
             return ast.ImportFrom(module=new_module, names=node.names, level=node.level)
@@ -54,12 +52,12 @@ class ImportRewriter(ast.NodeTransformer):
         """Rewrite 'import X' statements."""
         new_names = []
         for name in node.names:
-            if name.name == self.original_module_name:
+            if name.name == self.original_root_package:
                 # Replace the original module name with the mount point
                 new_names.append(ast.alias(name=self.mount_point, asname=name.asname))
-            elif name.name.startswith(f"{self.original_module_name}."):
+            elif name.name.startswith(f"{self.original_root_package}."):
                 # Handle submodule imports
-                suffix = name.name[len(self.original_module_name) :]
+                suffix = name.name[len(self.original_root_package) :]
                 new_name = f"{self.mount_point}{suffix}"
                 new_names.append(ast.alias(name=new_name, asname=name.asname))
             else:
@@ -90,108 +88,40 @@ def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
         return None
 
 
-def rewrite_module_code(code: str, original_module_name: str, mount_point: str) -> str:
+def rewrite_module_code(code: str, original_root_package: str, mount_point: str) -> str:
     """Rewrite imports in module code.
 
     Args:
         code: The source code to rewrite
-        original_module_name: The name of the module being rewritten
+        original_root_package: The root package name of the module being rewritten
         mount_point: The name of the mount point module
 
     Returns:
         Rewritten source code
     """
     tree = ast.parse(code)
-    transformer = ImportRewriter(original_module_name, mount_point)
+    transformer = ImportRewriter(original_root_package, mount_point)
     transformed_tree = transformer.visit(tree)
     ast.fix_missing_locations(transformed_tree)
     return ast.unparse(transformed_tree)
 
 
-def _load_combined_module(
-    upper_module: str | None, lower_module: str | None, target_module: ModuleType
-) -> None:
-    """Load and combine module content into the target module.
-
-    Args:
-        upper_module: The name of the upper module (or None)
-        lower_module: The name of the lower module (or None)
-        target_module: The target module to load content into
-    """
-    mount_point = target_module.__name__
-
-    # Load and execute lower module first
-    if lower_module:
-        try:
-            lower_spec = find_spec(lower_module)
-            if lower_spec:
-                # First try to get the source code
-                lower_source = get_module_source(lower_module, lower_spec)
-                print(lower_spec.name)
-
-                if lower_source:
-                    # Rewrite imports and execute
-                    print("AAAA", lower_module, mount_point)
-                    lower_source = rewrite_module_code(
-                        lower_source, lower_module, mount_point
-                    )
-                    print("Execing", lower_spec.name)
-                    exec(
-                        f"# Code from {lower_module}\n{lower_source}",
-                        target_module.__dict__,
-                    )
-                elif lower_spec.loader and isinstance(lower_spec.loader, InspectLoader):
-                    # Fall back to compiled code if source is not available
-                    try:
-                        lower_code = lower_spec.loader.get_code(lower_module)
-                        if lower_code:
-                            exec(lower_code, target_module.__dict__)
-                    except (ImportError, AttributeError):
-                        pass
-        except (ImportError, FileNotFoundError):
-            pass
-
-    # Then load and execute upper module
-    if upper_module:
-        try:
-            upper_spec = find_spec(upper_module)
-            if upper_spec:
-                # First try to get the source code
-                upper_source = get_module_source(upper_module, upper_spec)
-
-                if upper_source:
-                    # Rewrite imports and execute
-                    upper_source = rewrite_module_code(
-                        upper_source, lower_module, mount_point
-                    )
-                    exec(
-                        f"# Code from {upper_module}\n{upper_source}",
-                        target_module.__dict__,
-                    )
-                elif upper_spec.loader and isinstance(upper_spec.loader, InspectLoader):
-                    # Fall back to compiled code if source is not available
-                    try:
-                        upper_code = upper_spec.loader.get_code(upper_module)
-                        if upper_code:
-                            exec(upper_code, target_module.__dict__)
-                    except (ImportError, AttributeError):
-                        pass
-        except (ImportError, FileNotFoundError):
-            pass
 
 
 class ModShimLoader:
     """Loader for shimmed modules."""
 
-    def __init__(self, upper_module: str, lower_module: str):
+    def __init__(self, upper_module: str, lower_module: str, root_mount_point: str):
         """Initialize the loader.
 
         Args:
             upper_module: The name of the upper module
             lower_module: The name of the lower module
+            root_mount_point: The root mount point for import rewriting
         """
         self.upper_module = upper_module
         self.lower_module = lower_module
+        self.root_mount_point = root_mount_point
 
     def create_module(self, spec: ModuleSpec) -> ModuleType:
         """Create a new module object."""
@@ -220,7 +150,81 @@ class ModShimLoader:
                 lower_name = f"{self.lower_module}.{suffix}"
 
         # Load the combined module content
-        _load_combined_module(upper_name, lower_name, module)
+        self._load_combined_module(upper_name, lower_name, module)
+
+    def _load_combined_module(
+        self, upper_module: str | None, lower_module: str | None, target_module: ModuleType
+    ) -> None:
+        """Load and combine module content into the target module.
+
+        Args:
+            upper_module: The name of the upper module (or None)
+            lower_module: The name of the lower module (or None)
+            target_module: The target module to load content into
+        """
+        # Get the root package names from ModShimFinder._mappings
+        if self.root_mount_point in ModShimFinder._mappings:
+            upper_root, lower_root = ModShimFinder._mappings[self.root_mount_point]
+        else:
+            # This should never happen, but just in case
+            upper_root = self.upper_module
+            lower_root = self.lower_module
+
+        # Load and execute lower module first
+        if lower_module:
+            try:
+                lower_spec = find_spec(lower_module)
+                if lower_spec:
+                    # First try to get the source code
+                    lower_source = get_module_source(lower_module, lower_spec)
+
+                    if lower_source:
+                        # Rewrite imports using the root package name
+                        lower_source = rewrite_module_code(
+                            lower_source, lower_root, self.root_mount_point
+                        )
+                        exec(
+                            f"# Code from {lower_module}\n{lower_source}",
+                            target_module.__dict__,
+                        )
+                    elif lower_spec.loader and isinstance(lower_spec.loader, InspectLoader):
+                        # Fall back to compiled code if source is not available
+                        try:
+                            lower_code = lower_spec.loader.get_code(lower_module)
+                            if lower_code:
+                                exec(lower_code, target_module.__dict__)
+                        except (ImportError, AttributeError):
+                            pass
+            except (ImportError, FileNotFoundError):
+                pass
+
+        # Then load and execute upper module
+        if upper_module:
+            try:
+                upper_spec = find_spec(upper_module)
+                if upper_spec:
+                    # First try to get the source code
+                    upper_source = get_module_source(upper_module, upper_spec)
+
+                    if upper_source:
+                        # Rewrite imports using the root package name
+                        upper_source = rewrite_module_code(
+                            upper_source, upper_root, self.root_mount_point
+                        )
+                        exec(
+                            f"# Code from {upper_module}\n{upper_source}",
+                            target_module.__dict__,
+                        )
+                    elif upper_spec.loader and isinstance(upper_spec.loader, InspectLoader):
+                        # Fall back to compiled code if source is not available
+                        try:
+                            upper_code = upper_spec.loader.get_code(upper_module)
+                            if upper_code:
+                                exec(upper_code, target_module.__dict__)
+                        except (ImportError, AttributeError):
+                            pass
+            except (ImportError, FileNotFoundError):
+                pass
 
 
 class ModShimFinder(MetaPathFinder):
