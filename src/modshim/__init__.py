@@ -45,6 +45,7 @@ class ImportRewriter(ast.NodeTransformer):
                 suffix = node.module[len(self.original_root_package) :]
                 new_module = f"{self.mount_point}{suffix}"
 
+            print(node.module, "->", new_module)
             return ast.ImportFrom(module=new_module, names=node.names, level=node.level)
         return node
 
@@ -106,8 +107,6 @@ def rewrite_module_code(code: str, original_root_package: str, mount_point: str)
     return ast.unparse(transformed_tree)
 
 
-
-
 class ModShimLoader:
     """Loader for shimmed modules."""
 
@@ -153,7 +152,10 @@ class ModShimLoader:
         self._load_combined_module(upper_name, lower_name, module)
 
     def _load_combined_module(
-        self, upper_module: str | None, lower_module: str | None, target_module: ModuleType
+        self,
+        upper_module: str | None,
+        lower_module: str | None,
+        target_module: ModuleType,
     ) -> None:
         """Load and combine module content into the target module.
 
@@ -183,11 +185,18 @@ class ModShimLoader:
                         lower_source = rewrite_module_code(
                             lower_source, lower_root, self.root_mount_point
                         )
-                        exec(
-                            f"# Code from {lower_module}\n{lower_source}",
-                            target_module.__dict__,
-                        )
-                    elif lower_spec.loader and isinstance(lower_spec.loader, InspectLoader):
+                        try:
+                            exec(
+                                f"# Code from {lower_module}\n{lower_source}",
+                                target_module.__dict__,
+                            )
+                        except Exception:
+                            for i, line in enumerate(lower_source.splitlines()):
+                                print(i, repr(line))
+                            raise
+                    elif lower_spec.loader and isinstance(
+                        lower_spec.loader, InspectLoader
+                    ):
                         # Fall back to compiled code if source is not available
                         try:
                             lower_code = lower_spec.loader.get_code(lower_module)
@@ -209,13 +218,15 @@ class ModShimLoader:
                     if upper_source:
                         # Rewrite imports using the root package name
                         upper_source = rewrite_module_code(
-                            upper_source, upper_root, self.root_mount_point
+                            upper_source, lower_root, self.root_mount_point
                         )
                         exec(
                             f"# Code from {upper_module}\n{upper_source}",
                             target_module.__dict__,
                         )
-                    elif upper_spec.loader and isinstance(upper_spec.loader, InspectLoader):
+                    elif upper_spec.loader and isinstance(
+                        upper_spec.loader, InspectLoader
+                    ):
                         # Fall back to compiled code if source is not available
                         try:
                             upper_code = upper_spec.loader.get_code(upper_module)
@@ -258,8 +269,7 @@ class ModShimFinder(MetaPathFinder):
             upper_module, lower_module = self._mappings[fullname]
             # Prevent recursion when mount point is the same as one of the source modules
             if fullname != upper_module and fullname != lower_module:
-                return self._create_spec(fullname, upper_module, lower_module)
-
+                return self._create_spec(fullname, upper_module, lower_module, fullname)
         # Check if this is a submodule of a mount point
         for mount_point, (upper_module, lower_module) in self._mappings.items():
             # Prevent recursion when trying to import a submodule that matches
@@ -267,15 +277,16 @@ class ModShimFinder(MetaPathFinder):
             if fullname.startswith(f"{mount_point}.") and not (
                 fullname.startswith((f"{upper_module}.", f"{lower_module}."))
             ):
-                return self._create_spec(fullname, upper_module, lower_module)
-
+                return self._create_spec(
+                    fullname, upper_module, lower_module, mount_point
+                )
         return None
 
     def _create_spec(
-        self, fullname: str, upper_module: str, lower_module: str
+        self, fullname: str, upper_module: str, lower_module: str, root_mount_point: str
     ) -> ModuleSpec:
         """Create a module spec for the given module name."""
-        loader = ModShimLoader(upper_module, lower_module)
+        loader = ModShimLoader(upper_module, lower_module, root_mount_point)
         spec = ModuleSpec(fullname, loader)
 
         # Add lower module submodule search locations
