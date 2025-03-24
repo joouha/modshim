@@ -33,10 +33,12 @@ class ImportRewriter(ast.NodeTransformer):
         """Rewrite 'from X import Y' statements."""
         # If this is an import from the original module or its submodules,
         # rewrite it to import from the mount point
+        print(node.module, self.original_module_name)
         if node.module and (
             node.module == self.original_module_name
             or node.module.startswith(f"{self.original_module_name}.")
         ):
+            print(node.module)
             # Replace the original module name with the mount point
             if node.module == self.original_module_name:
                 new_module = self.mount_point
@@ -125,12 +127,15 @@ def _load_combined_module(
             if lower_spec:
                 # First try to get the source code
                 lower_source = get_module_source(lower_module, lower_spec)
+                print(lower_spec.name)
 
                 if lower_source:
                     # Rewrite imports and execute
+                    print("AAAA", lower_module, mount_point)
                     lower_source = rewrite_module_code(
                         lower_source, lower_module, mount_point
                     )
+                    print("Execing", lower_spec.name)
                     exec(
                         f"# Code from {lower_module}\n{lower_source}",
                         target_module.__dict__,
@@ -253,11 +258,11 @@ class ModShimFinder(MetaPathFinder):
 
         # Check if this is a submodule of a mount point
         for mount_point, (upper_module, lower_module) in self._mappings.items():
+            # Prevent recursion when trying to import a submodule that matches
+            # the pattern of the source modules
             if fullname.startswith(f"{mount_point}.") and not (
                 fullname.startswith((f"{upper_module}.", f"{lower_module}."))
             ):
-                # Prevent recursion when trying to import a submodule that matches
-                # the pattern of the source modules
                 return self._create_spec(fullname, upper_module, lower_module)
 
         return None
@@ -269,53 +274,27 @@ class ModShimFinder(MetaPathFinder):
         loader = ModShimLoader(upper_module, lower_module)
         spec = ModuleSpec(fullname, loader)
 
-        # Check if this should be a package - we need to check both the direct module
-        # and parent modules for package status
-        is_package = False
+        # Add lower module submodule search locations
+        try:
+            lower_spec = find_spec(lower_module)
+            if lower_spec and lower_spec.submodule_search_locations is not None:
+                spec.submodule_search_locations = [
+                    *(spec.submodule_search_locations or []),
+                    *list(lower_spec.submodule_search_locations),
+                ]
+        except (ImportError, AttributeError):
+            pass
 
-        # Determine the corresponding module names in the upper and lower modules
-        if fullname.startswith(f"{upper_module}.") and upper_module:
-            # This is a submodule of the upper module
-            relative_name = fullname[len(upper_module) + 1:]
-            upper_name = f"{upper_module}.{relative_name}"
-            lower_name = f"{lower_module}.{relative_name}" if lower_module else None
-        elif fullname.startswith(f"{lower_module}.") and lower_module:
-            # This is a submodule of the lower module
-            relative_name = fullname[len(lower_module) + 1:]
-            upper_name = f"{upper_module}.{relative_name}" if upper_module else None
-            lower_name = f"{lower_module}.{relative_name}"
-        else:
-            # This is the mount point itself
-            upper_name = upper_module
-            lower_name = lower_module
-
-        # Check if the upper module is a package
-        if upper_name:
-            try:
-                upper_spec = find_spec(upper_name)
-                if upper_spec and upper_spec.submodule_search_locations is not None:
-                    is_package = True
-                    # Use the actual search paths from the upper module if available
-                    if not spec.submodule_search_locations:
-                        spec.submodule_search_locations = list(upper_spec.submodule_search_locations)
-            except (ImportError, AttributeError):
-                pass
-
-        # Check if the lower module is a package
-        if lower_name and not is_package:  # Only check lower if upper isn't a package
-            try:
-                lower_spec = find_spec(lower_name)
-                if lower_spec and lower_spec.submodule_search_locations is not None:
-                    is_package = True
-                    # Use the actual search paths from the lower module if available
-                    if not spec.submodule_search_locations:
-                        spec.submodule_search_locations = list(lower_spec.submodule_search_locations)
-            except (ImportError, AttributeError):
-                pass
-
-        # If it's a package but we couldn't get search paths, provide an empty list
-        if is_package and not spec.submodule_search_locations:
-            spec.submodule_search_locations = []
+        # Add upper module submodule search locations
+        try:
+            upper_spec = find_spec(upper_module)
+            if upper_spec and upper_spec.submodule_search_locations is not None:
+                spec.submodule_search_locations = [
+                    *(spec.submodule_search_locations or []),
+                    *list(upper_spec.submodule_search_locations),
+                ]
+        except (ImportError, AttributeError):
+            pass
 
         return spec
 
