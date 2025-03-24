@@ -158,7 +158,7 @@ class ModShimLoader:
 
         # If this is a package, set up package attributes
         if spec.submodule_search_locations is not None:
-            module.__path__ = []
+            module.__path__ = list(spec.submodule_search_locations)
 
         return module
 
@@ -237,9 +237,8 @@ class ModShimLoader:
                 )
 
         # Create a working copy of the module's state after executing the lower module
-        # parts = module.__name__.split(".")
-        # working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
-        working_name = f"_working_{module.__name__}"
+        parts = module.__name__.split(".")
+        working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
         working_module = ModuleType(working_name)
         working_module.__name__ = working_name
         working_module.__file__ = getattr(module, "__file__", None)
@@ -259,7 +258,10 @@ class ModShimLoader:
             if upper_source:
                 # Rewrite imports using the root package name
                 upper_source = self.rewrite_module_code(
-                    upper_source, self.lower_root, f"_working_{self.mount_root}"
+                    upper_source, self.lower_root, self.mount_root
+                )
+                upper_source = self.rewrite_module_code(
+                    upper_source, module.__name__, working_name
                 )
 
                 # Execute the code with the filename that matches the line cache entry
@@ -317,21 +319,12 @@ class ModShimFinder(MetaPathFinder):
     ) -> ModuleSpec | None:
         """Find a module spec for the given module name."""
         # Check if this is a direct mount point
-        if (
-            fullname in self._mappings
-            or fullname.removeprefix("_working") in self._mappings
-        ):
+        if fullname in self._mappings:
             upper_root, lower_root = self._mappings[fullname]
-            # Prevent recursion when mount point is the same as one of the source modules
-            if fullname != upper_root and fullname != lower_root:
-                return self._create_spec(fullname, upper_root, lower_root, fullname)
+            return self._create_spec(fullname, upper_root, lower_root, fullname)
         # Check if this is a submodule of a mount point
         for mount_root, (upper_root, lower_root) in self._mappings.items():
-            # Prevent recursion when trying to import a submodule that matches
-            # the pattern of the source modules
-            if fullname.startswith(f"{mount_root}.") and not (
-                fullname.startswith((f"{upper_root}.", f"{lower_root}."))
-            ):
+            if fullname.startswith(f"{mount_root}."):
                 return self._create_spec(fullname, upper_root, lower_root, mount_root)
 
         return None
@@ -346,7 +339,7 @@ class ModShimFinder(MetaPathFinder):
 
         # Temporarily disable the finder when loading the specs
         try:
-            self._mappings.pop(mount_root)
+            sys.meta_path.remove(self)
             # Find upper and lower specs
             try:
                 lower_spec = find_spec(lower_name)
@@ -358,7 +351,7 @@ class ModShimFinder(MetaPathFinder):
                 upper_spec = None
         finally:
             # Restore the finder
-            self._mappings[mount_root] = (upper_root, lower_root)
+            sys.meta_path.insert(0, self)
 
         loader = ModShimLoader(
             lower_spec, upper_spec, lower_root, upper_root, mount_root
@@ -370,18 +363,18 @@ class ModShimFinder(MetaPathFinder):
             is_package=lower_spec.submodule_search_locations is not None,
         )
 
-        # Add lower module submodule search locations
-        if lower_spec and lower_spec.submodule_search_locations is not None:
-            spec.submodule_search_locations = [
-                *(spec.submodule_search_locations or []),
-                *list(lower_spec.submodule_search_locations),
-            ]
-
-        # Add upper module submodule search locations
+        # Add upper module submodule search locations first
         if upper_spec and upper_spec.submodule_search_locations is not None:
             spec.submodule_search_locations = [
                 *(spec.submodule_search_locations or []),
                 *list(upper_spec.submodule_search_locations),
+            ]
+
+        # Add lower module submodule search locations to fall back on
+        if lower_spec and lower_spec.submodule_search_locations is not None:
+            spec.submodule_search_locations = [
+                *(spec.submodule_search_locations or []),
+                *list(lower_spec.submodule_search_locations),
             ]
 
         return spec
