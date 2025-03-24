@@ -1,10 +1,9 @@
 """Enhanced pathlib local implementations."""
 
-from pathlib._local import Path as OriginalPath
+from pathlib._abc import PathBase as OriginalPathBase
 
 
-# Create enhanced Path classes with our PathBase
-class Path(OriginalPath):
+class PathBase(OriginalPathBase):
     """Enhanced Path with additional utilities."""
 
     @property
