@@ -15,8 +15,8 @@ from types import ModuleType
 from typing import ClassVar
 
 
-class ImportRewriter(ast.NodeTransformer):
-    """AST transformer that rewrites imports to point to the mount point."""
+class ModuleReferenceRewriter(ast.NodeTransformer):
+    """AST transformer that rewrites module references to point to the mount point."""
 
     def __init__(self, original_root_package: str, mount_point: str) -> None:
         """Initialize the rewriter.
@@ -68,6 +68,42 @@ class ImportRewriter(ast.NodeTransformer):
             return ast.Import(names=new_names)
         return node
 
+    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+        """Rewrite module references like 'urllib.response' to 'urllib_punycode.response'."""
+        # First visit any child nodes
+        node = self.generic_visit(node)
+        
+        # Check if this is a reference to the original module
+        if isinstance(node.value, ast.Name) and node.value.id == self.original_root_package:
+            # Replace the module name with the mount point
+            return ast.Attribute(
+                value=ast.Name(id=self.mount_point, ctx=node.value.ctx),
+                attr=node.attr,
+                ctx=node.ctx
+            )
+        
+        # Check for nested attributes like urllib.parse.urlparse
+        if isinstance(node.value, ast.Attribute):
+            # Build the full attribute chain to check if it starts with the original module
+            attrs = []
+            current = node
+            while isinstance(current, ast.Attribute):
+                attrs.insert(0, current.attr)
+                current = current.value
+            
+            # If the base is the original module name, rewrite the entire chain
+            if isinstance(current, ast.Name) and current.id == self.original_root_package:
+                # Start with the mount point as the base
+                result = ast.Name(id=self.mount_point, ctx=current.ctx)
+                
+                # Rebuild the attribute chain
+                for attr in attrs:
+                    result = ast.Attribute(value=result, attr=attr, ctx=node.ctx)
+                
+                return result
+        
+        return node
+
 
 def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
     """Get the source code of a module using its loader.
@@ -90,7 +126,7 @@ def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
 
 
 def rewrite_module_code(code: str, original_root_package: str, mount_point: str) -> str:
-    """Rewrite imports in module code.
+    """Rewrite imports and module references in module code.
 
     Args:
         code: The source code to rewrite
@@ -101,9 +137,12 @@ def rewrite_module_code(code: str, original_root_package: str, mount_point: str)
         Rewritten source code
     """
     tree = ast.parse(code)
-    transformer = ImportRewriter(original_root_package, mount_point)
+    
+    # Use the new transformer that handles both imports and module references
+    transformer = ModuleReferenceRewriter(original_root_package, mount_point)
     transformed_tree = transformer.visit(tree)
     ast.fix_missing_locations(transformed_tree)
+    
     return ast.unparse(transformed_tree)
 
 
