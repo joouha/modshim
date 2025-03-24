@@ -204,10 +204,26 @@ class ModShimLoader:
                         lower_source = self.rewrite_module_code(
                             lower_source, self.lower_root, self.mount_root
                         )
-                        exec(
-                            f"# Code from {lower_name}\n{lower_source}",
-                            module.__dict__,
-                        )
+
+                        lower_filename = f"{module.__file__}::{lower_spec.origin}"
+                        # Execute the code with the filename that matches the line cache entry
+                        try:
+                            exec(
+                                compile(lower_source, lower_filename, "exec"),
+                                module.__dict__,
+                            )
+                        except:
+                            import linecache
+
+                            # Add the source to the line cache on error for better error reporting
+                            linecache.cache[lower_filename] = (
+                                len(lower_source),
+                                None,
+                                lower_source.splitlines(True),
+                                lower_filename,
+                            )
+                            raise
+
                     elif lower_spec.loader and isinstance(
                         lower_spec.loader, InspectLoader
                     ):
@@ -259,10 +275,25 @@ class ModShimLoader:
                         upper_source = self.rewrite_module_code(
                             upper_source, self.lower_root, f"_frozen_{self.mount_root}"
                         )
-                        exec(
-                            f"# Code from {upper_name}\n{upper_source}",
-                            module.__dict__,
-                        )
+
+                        # Execute the code with the filename that matches the line cache entry
+                        upper_filename = f"{module.__file__}::{upper_spec.origin}"
+                        try:
+                            exec(
+                                compile(upper_source, upper_filename, "exec"),
+                                module.__dict__,
+                            )
+                        except Exception:
+                            import linecache
+
+                            # Add the source to the line cache on error for better error reporting
+                            linecache.cache[upper_filename] = (
+                                len(upper_source),
+                                None,
+                                upper_source.splitlines(True),
+                                upper_filename,
+                            )
+                            raise
                     elif upper_spec.loader and isinstance(
                         upper_spec.loader, InspectLoader
                     ):
