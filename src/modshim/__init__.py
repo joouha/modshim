@@ -45,7 +45,6 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
                 suffix = node.module[len(self.original_root_package) :]
                 new_module = f"{self.mount_point}{suffix}"
 
-            print(node.module, "->", new_module)
             return ast.ImportFrom(module=new_module, names=node.names, level=node.level)
         return node
 
@@ -72,16 +71,19 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
         """Rewrite module references like 'urllib.response' to 'urllib_punycode.response'."""
         # First visit any child nodes
         node = self.generic_visit(node)
-        
+
         # Check if this is a reference to the original module
-        if isinstance(node.value, ast.Name) and node.value.id == self.original_root_package:
+        if (
+            isinstance(node.value, ast.Name)
+            and node.value.id == self.original_root_package
+        ):
             # Replace the module name with the mount point
             return ast.Attribute(
                 value=ast.Name(id=self.mount_point, ctx=node.value.ctx),
                 attr=node.attr,
-                ctx=node.ctx
+                ctx=node.ctx,
             )
-        
+
         # Check for nested attributes like urllib.parse.urlparse
         if isinstance(node.value, ast.Attribute):
             # Build the full attribute chain to check if it starts with the original module
@@ -90,18 +92,21 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             while isinstance(current, ast.Attribute):
                 attrs.insert(0, current.attr)
                 current = current.value
-            
+
             # If the base is the original module name, rewrite the entire chain
-            if isinstance(current, ast.Name) and current.id == self.original_root_package:
+            if (
+                isinstance(current, ast.Name)
+                and current.id == self.original_root_package
+            ):
                 # Start with the mount point as the base
                 result = ast.Name(id=self.mount_point, ctx=current.ctx)
-                
+
                 # Rebuild the attribute chain
                 for attr in attrs:
                     result = ast.Attribute(value=result, attr=attr, ctx=node.ctx)
-                
+
                 return result
-        
+
         return node
 
 
@@ -137,12 +142,12 @@ def rewrite_module_code(code: str, original_root_package: str, mount_point: str)
         Rewritten source code
     """
     tree = ast.parse(code)
-    
+
     # Use the new transformer that handles both imports and module references
     transformer = ModuleReferenceRewriter(original_root_package, mount_point)
     transformed_tree = transformer.visit(tree)
     ast.fix_missing_locations(transformed_tree)
-    
+
     return ast.unparse(transformed_tree)
 
 
@@ -224,15 +229,10 @@ class ModShimLoader:
                         lower_source = rewrite_module_code(
                             lower_source, lower_root, self.root_mount_point
                         )
-                        try:
-                            exec(
-                                f"# Code from {lower_module}\n{lower_source}",
-                                target_module.__dict__,
-                            )
-                        except Exception:
-                            for i, line in enumerate(lower_source.splitlines()):
-                                print(i, repr(line))
-                            raise
+                        exec(
+                            f"# Code from {lower_module}\n{lower_source}",
+                            target_module.__dict__,
+                        )
                     elif lower_spec.loader and isinstance(
                         lower_spec.loader, InspectLoader
                     ):
