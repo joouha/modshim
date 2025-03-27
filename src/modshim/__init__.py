@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 from importlib import import_module
-from importlib.abc import InspectLoader, MetaPathFinder
+from importlib.abc import InspectLoader, Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import find_spec, module_from_spec
 from types import ModuleType
@@ -78,13 +78,17 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             return ast.Import(names=new_names)
         return node
 
-    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
+    def visit_Attribute(self, node: ast.AST) -> ast.AST:
         """Rewrite module references like 'urllib.response' to 'urllib_punycode.response'."""
         # First visit any child nodes
         node = self.generic_visit(node)
 
         # Check if this is a reference to the original module
-        if isinstance(node.value, ast.Name) and node.value.id == self.search:
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == self.search
+        ):
             # Replace the module name with the mount point
             return ast.Attribute(
                 value=ast.Name(id=self.replace, ctx=node.value.ctx),
@@ -93,7 +97,7 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             )
 
         # Check for nested attributes like urllib.parse.urlparse
-        if isinstance(node.value, ast.Attribute):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute):
             # Build the full attribute chain to check if it starts with the original module
             attrs = []
             current = node
@@ -105,10 +109,9 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             if isinstance(current, ast.Name) and current.id == self.search:
                 # Start with the mount point as the base
                 result = ast.Name(id=self.replace, ctx=current.ctx)
-
                 # Rebuild the attribute chain
                 for attr in attrs:
-                    result = ast.Attribute(value=result, attr=attr, ctx=node.ctx)
+                    result = ast.Attribute(value=result, attr=attr, ctx=attr.ctx)
 
                 return result
 
@@ -135,7 +138,7 @@ def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
         return None
 
 
-class ModShimLoader:
+class ModShimLoader(Loader):
     """Loader for shimmed modules."""
 
     # Track module that have already been created
@@ -193,13 +196,13 @@ class ModShimLoader:
 
     def load_module(self, fullname: str) -> ModuleType:
         """Load a module by name.
-        
+
         Args:
             fullname: The full name of the module to load
-            
+
         Returns:
             The loaded module
-            
+
         Raises:
             ModuleNotFoundError: If the module cannot be found
         """
