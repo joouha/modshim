@@ -7,12 +7,24 @@ that includes functionality from both. Internal imports are redirected to the mo
 from __future__ import annotations
 
 import ast
+import logging
+import os
 import sys
+from importlib import import_module
 from importlib.abc import InspectLoader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import find_spec, module_from_spec
 from types import ModuleType
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+# Set up logger with NullHandler
+log = logging.getLogger(__name__)
+log.addHandler(logging.NullHandler())
+if os.getenv("MODSHIM_DEBUG"):
+    logging.basicConfig(level=logging.DEBUG)
 
 
 class ModuleReferenceRewriter(ast.NodeTransformer):
@@ -122,11 +134,14 @@ def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
     except (ImportError, AttributeError):
         return None
 
-    # TODO - use the `dec` module to decompile code if the source is not available
-
 
 class ModShimLoader:
     """Loader for shimmed modules."""
+
+    # Track module that have already been created
+    cache: ClassVar[dict[tuple[str, str], ModuleType]] = {}
+    # Track modules that are currently being processed to detect circular shimming
+    _processing: ClassVar[set[ModuleType]] = set()
 
     def __init__(
         self,
@@ -135,6 +150,7 @@ class ModShimLoader:
         lower_root: str,
         upper_root: str,
         mount_root: str,
+        finder: ModShimFinder,
     ) -> None:
         """Initialize the loader.
 
@@ -143,14 +159,21 @@ class ModShimLoader:
             lower_module: The name of the lower module
             root_mount_point: The root mount point for import rewriting
         """
+        # AI! fix this docstring
         self.lower_spec = lower_spec
         self.upper_spec = upper_spec
         self.lower_root = lower_root
         self.upper_root = upper_root
         self.mount_root = mount_root
+        self.finder = finder
 
     def create_module(self, spec: ModuleSpec) -> ModuleType:
         """Create a new module object."""
+        key = spec.name, self.mount_root
+        if key in self.cache:
+            log.debug("Returning cached module %r", spec.name)
+            return self.cache[key]
+
         module = ModuleType(spec.name)
         module.__file__ = f"<{spec.name}>"
         module.__loader__ = self
@@ -160,7 +183,18 @@ class ModShimLoader:
         if spec.submodule_search_locations is not None:
             module.__path__ = list(spec.submodule_search_locations)
 
+        # Store in cache
+        # with self.finder._cache_lock:
+        self.cache[key] = module
+
         return module
+
+    def load_module(self, fullname: str) -> ModuleType:
+        # AI! Ad a docstring here
+        spec = find_spec(fullname)
+        if spec is None:
+            raise ModuleNotFoundError()
+        return self.create_module(spec)
 
     def rewrite_module_code(self, code: str, search: str, replace: str) -> str:
         """Rewrite imports and module references in module code.
@@ -171,6 +205,7 @@ class ModShimLoader:
         Returns:
             Rewritten source code
         """
+        # AI Fix this docstring
         tree = ast.parse(code)
 
         # Use the new transformer that handles both imports and module references
@@ -182,9 +217,28 @@ class ModShimLoader:
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by combining upper and lower modules."""
+        log.debug("Exec_module called for %r", module.__name__)
+
+        # Check if we're in a circular shimming situation
+        if module in self._processing:
+            return
+        # Mark this module as being processed to detect circular shimming
+        self._processing.add(module)
+
         # Calculate upper and lower names
         lower_name = module.__name__.replace(self.mount_root, self.lower_root)
         upper_name = module.__name__.replace(self.mount_root, self.upper_root)
+
+        # Create a working copy of the module's state after executing the lower module
+        parts = module.__name__.split(".")
+        working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
+        working_module = ModuleType(working_name)
+        working_module.__name__ = working_name
+        working_module.__file__ = getattr(module, "__file__", None)
+        working_module.__package__ = getattr(module, "__package__", None)
+
+        # Register the modules in sys.modules
+        sys.modules[working_name] = working_module
 
         if lower_spec := self.lower_spec:
             # First try to get the source code
@@ -199,7 +253,8 @@ class ModShimLoader:
                 lower_filename = f"{module.__file__}::{lower_spec.origin}"
                 # Execute the code with the filename that matches the line cache entry
                 try:
-                    exec(
+                    log.debug("Executing lower: %r", self.lower_spec.name)
+                    exec(  # noqa: S102
                         compile(lower_source, lower_filename, "exec"),
                         module.__dict__,
                     )
@@ -220,10 +275,10 @@ class ModShimLoader:
                 try:
                     lower_code = lower_spec.loader.get_code(lower_name)
                     if lower_code:
-                        exec(lower_code, module.__dict__)
+                        exec(lower_code, module.__dict__)  # noqa: S102
                 except (ImportError, AttributeError):
                     pass
-            else:
+            elif lower_spec.loader:
                 # If all else fails, execute the lower module then copy its attributes
                 lower_module = module_from_spec(lower_spec)
                 lower_spec.loader.exec_module(lower_module)
@@ -236,19 +291,10 @@ class ModShimLoader:
                     }
                 )
 
-        # Create a working copy of the module's state after executing the lower module
-        parts = module.__name__.split(".")
-        working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
-        working_module = ModuleType(working_name)
-        working_module.__name__ = working_name
-        working_module.__file__ = getattr(module, "__file__", None)
-        working_module.__package__ = getattr(module, "__package__", None)
-        # Copy all attributes from the merged module
-        for key, value in module.__dict__.items():
-            if not key.startswith("__"):
-                setattr(working_module, key, value)
-        # Register the working module in sys.modules
-        sys.modules[working_name] = working_module
+        # Copy module state to working module
+        working_module.__dict__.update(
+            {k: v for k, v in module.__dict__.items() if not k.startswith("__")}
+        )
 
         # Load and execute upper module
         if upper_spec := self.upper_spec:
@@ -260,6 +306,8 @@ class ModShimLoader:
                 upper_source = self.rewrite_module_code(
                     upper_source, self.lower_root, self.mount_root
                 )
+                # Rewrite import of the current module to the working module to prevent
+                # recursion errors
                 upper_source = self.rewrite_module_code(
                     upper_source, module.__name__, working_name
                 )
@@ -267,7 +315,8 @@ class ModShimLoader:
                 # Execute the code with the filename that matches the line cache entry
                 upper_filename = f"{module.__file__}::{upper_spec.origin}"
                 try:
-                    exec(
+                    log.debug("Executing upper: %r", self.upper_spec.name)
+                    exec(  # noqa: S102
                         compile(upper_source, upper_filename, "exec"),
                         module.__dict__,
                     )
@@ -287,9 +336,15 @@ class ModShimLoader:
                 try:
                     upper_code = upper_spec.loader.get_code(upper_name)
                     if upper_code:
-                        exec(upper_code, module.__dict__)
+                        exec(upper_code, module.__dict__)  # noqa: S102
+
                 except (ImportError, AttributeError):
                     pass
+
+        # Remove this module from processing set
+        self._processing.discard(module)
+
+        log.debug("Exec_module completed for %r", module.__name__)
 
 
 class ModShimFinder(MetaPathFinder):
@@ -314,17 +369,27 @@ class ModShimFinder(MetaPathFinder):
     def find_spec(
         self,
         fullname: str,
-        path: list[str] | None = None,
+        path: Sequence[str] | None = None,
         target: ModuleType | None = None,
     ) -> ModuleSpec | None:
         """Find a module spec for the given module name."""
+        log.debug("Find spec called for %r", fullname)
+        # Check if this module is already being imported
+        if fullname in sys.modules:
+            return None  # Let Python continue with normal import
+
         # Check if this is a direct mount point
         if fullname in self._mappings:
             upper_root, lower_root = self._mappings[fullname]
+            # if fullname != upper_root and fullname != lower_root:
+            # if fullname != lower_root:
             return self._create_spec(fullname, upper_root, lower_root, fullname)
+
         # Check if this is a submodule of a mount point
         for mount_root, (upper_root, lower_root) in self._mappings.items():
+            # if fullname.startswith(f"{mount_root}."):
             if fullname.startswith(f"{mount_root}."):
+                # if not (fullname.startswith((f"{upper_root}.", f"{lower_root}."))):
                 return self._create_spec(fullname, upper_root, lower_root, mount_root)
 
         return None
@@ -339,28 +404,39 @@ class ModShimFinder(MetaPathFinder):
 
         # Temporarily disable the finder when loading the specs
         try:
-            sys.meta_path.remove(self)
+            if self in sys.meta_path:
+                sys.meta_path.remove(self)
+
             # Find upper and lower specs
             try:
+                log.debug("Finding lower spec %r", lower_name)
                 lower_spec = find_spec(lower_name)
             except (ImportError, AttributeError):
                 lower_spec = None
+            log.debug("Found lower spec %r", lower_spec)
             try:
+                log.debug("Finding upper spec %r", upper_name)
                 upper_spec = find_spec(upper_name)
+                # if upper_spec and isinstance(upper_spec.loader, ModShimLoader):
+                #     upper_spec = upper_spec.loader.upper_spec
             except (ImportError, AttributeError):
                 upper_spec = None
+            log.debug("Found upper spec %r", upper_spec)
+
         finally:
             # Restore the finder
             sys.meta_path.insert(0, self)
 
         loader = ModShimLoader(
-            lower_spec, upper_spec, lower_root, upper_root, mount_root
+            lower_spec, upper_spec, lower_root, upper_root, mount_root, finder=self
         )
         spec = ModuleSpec(
             name=fullname,
             loader=loader,
             origin=None,
-            is_package=lower_spec.submodule_search_locations is not None,
+            is_package=lower_spec.submodule_search_locations is not None
+            if lower_spec
+            else False,
         )
 
         # Add upper module submodule search locations first
@@ -371,12 +447,11 @@ class ModShimFinder(MetaPathFinder):
             ]
 
         # Add lower module submodule search locations to fall back on
-        if lower_spec and lower_spec.submodule_search_locations is not None:
-            spec.submodule_search_locations = [
-                *(spec.submodule_search_locations or []),
-                *list(lower_spec.submodule_search_locations),
-            ]
-
+        # if lower_spec and lower_spec.submodule_search_locations is not None:
+        #     spec.submodule_search_locations = [
+        #         *(spec.submodule_search_locations or []),
+        #         *list(lower_spec.submodule_search_locations),
+        #     ]
         return spec
 
 
@@ -395,9 +470,43 @@ def shim(lower: str, upper: str | None = None, mount: str | None = None) -> None
     Returns:
         The combined module or package
     """
+    # Validate module names
+    if not lower:
+        raise ValueError("Lower module name cannot be empty")
+
+    # Use calling package name if 'upper' parameter name is empty
+    if upper is None:
+        # Get the caller's frame to find its module
+        frame = sys._getframe(1)
+        if frame is not None and frame.f_globals is not None:
+            upper = frame.f_globals.get("__package__", "")
+            if not upper:
+                upper = frame.f_globals.get("__name__", "")
+                if upper == "__main__":
+                    raise ValueError("Cannot determine package name from __main__")
+        if not upper:
+            raise ValueError("Upper module name cannot be determined")
+
+    # If mount not specified, use the upper module name
+    if mount is None and upper is not None:
+        mount = upper
+
+    if not upper:
+        raise ValueError("Upper module name cannot be empty")
+    if not lower:
+        raise ValueError("Lower module name cannot be empty")
+    if not mount:
+        raise ValueError("Mount point cannot be empty")
+
     # Register our finder in sys.meta_path if not already there
     if not any(isinstance(finder, ModShimFinder) for finder in sys.meta_path):
         sys.meta_path.insert(0, ModShimFinder())
 
     # Register the mapping for this mount point
     ModShimFinder.register_mapping(mount, upper, lower)
+
+    # Re-import the mounted module if it has already been imported
+    # This fixes issues when modules are mounted over their uppers
+    if mount in sys.modules:
+        del sys.modules[mount]
+        import_module(mount)
