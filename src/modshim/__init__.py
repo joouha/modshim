@@ -15,7 +15,7 @@ from importlib.abc import InspectLoader, Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import find_spec, module_from_spec
 from types import ModuleType
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, override
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -37,10 +37,11 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             search: The root package name of the module being rewritten
             replace: The name package name to use as the replacement
         """
-        self.search = search
-        self.replace = replace
         super().__init__()
+        self.search: str = search
+        self.replace: str = replace
 
+    @override
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.ImportFrom:
         """Rewrite 'from X import Y' statements."""
         # If this is an import from the original module or its submodules,
@@ -59,9 +60,10 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             return ast.ImportFrom(module=new_module, names=node.names, level=node.level)
         return node
 
+    @override
     def visit_Import(self, node: ast.Import) -> ast.Import:
         """Rewrite 'import X' statements."""
-        new_names = []
+        new_names: list[ast.alias] = []
         for name in node.names:
             if name.name == self.search:
                 # Replace the original module name with the mount point
@@ -78,6 +80,7 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             return ast.Import(names=new_names)
         return node
 
+    @override
     def visit_Attribute(self, node: ast.AST) -> ast.AST:
         """Rewrite module references like 'urllib.response' to 'urllib_punycode.response'."""
         # First visit any child nodes
@@ -99,10 +102,10 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
         # Check for nested attributes like urllib.parse.urlparse
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute):
             # Build the full attribute chain to check if it starts with the original module
-            attrs = []
+            attrs: list[tuple[str, ast.expr_context]] = []
             current = node
             while isinstance(current, ast.Attribute):
-                attrs.insert(0, current.attr)
+                attrs.insert(0, (current.attr, current.ctx))
                 current = current.value
 
             # If the base is the original module name, rewrite the entire chain
@@ -110,8 +113,8 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
                 # Start with the mount point as the base
                 result = ast.Name(id=self.replace, ctx=current.ctx)
                 # Rebuild the attribute chain
-                for attr in attrs:
-                    result = ast.Attribute(value=result, attr=attr, ctx=attr.ctx)
+                for attr, ctx in attrs:
+                    result = ast.Attribute(value=result, attr=attr, ctx=ctx)
 
                 return result
 
@@ -165,13 +168,14 @@ class ModShimLoader(Loader):
             mount_root: The root mount point for import rewriting
             finder: The ModShimFinder instance that created this loader
         """
-        self.lower_spec = lower_spec
-        self.upper_spec = upper_spec
-        self.lower_root = lower_root
-        self.upper_root = upper_root
-        self.mount_root = mount_root
-        self.finder = finder
+        self.lower_spec: ModuleSpec | None = lower_spec
+        self.upper_spec: ModuleSpec | None = upper_spec
+        self.lower_root: str = lower_root
+        self.upper_root: str = upper_root
+        self.mount_root: str = mount_root
+        self.finder: ModShimFinder = finder
 
+    @override
     def create_module(self, spec: ModuleSpec) -> ModuleType:
         """Create a new module object."""
         key = spec.name, self.mount_root
@@ -194,23 +198,6 @@ class ModShimLoader(Loader):
 
         return module
 
-    def load_module(self, fullname: str) -> ModuleType:
-        """Load a module by name.
-
-        Args:
-            fullname: The full name of the module to load
-
-        Returns:
-            The loaded module
-
-        Raises:
-            ModuleNotFoundError: If the module cannot be found
-        """
-        spec = find_spec(fullname)
-        if spec is None:
-            raise ModuleNotFoundError()
-        return self.create_module(spec)
-
     def rewrite_module_code(self, code: str, search: str, replace: str) -> str:
         """Rewrite imports and module references in module code.
 
@@ -226,11 +213,12 @@ class ModShimLoader(Loader):
 
         # Use the new transformer that handles both imports and module references
         transformer = ModuleReferenceRewriter(search, replace)
-        transformed_tree = transformer.visit(tree)
-        ast.fix_missing_locations(transformed_tree)
+        transformed_tree: ast.AST = transformer.visit(tree)
+        _ = ast.fix_missing_locations(transformed_tree)
 
         return ast.unparse(transformed_tree)
 
+    @override
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by combining upper and lower modules."""
         log.debug("Exec_module called for %r", module.__name__)
@@ -382,6 +370,7 @@ class ModShimFinder(MetaPathFinder):
         """
         cls._mappings[mount_root] = (upper_root, lower_root)
 
+    @override
     def find_spec(
         self,
         fullname: str,
@@ -471,7 +460,7 @@ class ModShimFinder(MetaPathFinder):
         return spec
 
 
-def shim(lower: str, upper: str | None = None, mount: str | None = None) -> None:
+def shim(lower: str, upper: str = "", mount: str = "") -> None:
     """Mount an upper module or package on top of a lower module or package.
 
     This function sets up import machinery to dynamically combine modules
@@ -491,10 +480,12 @@ def shim(lower: str, upper: str | None = None, mount: str | None = None) -> None
         raise ValueError("Lower module name cannot be empty")
 
     # Use calling package name if 'upper' parameter name is empty
-    if upper is None:
+    if not upper:
+        import inspect
+
         # Get the caller's frame to find its module
-        frame = sys._getframe(1)
-        if frame is not None and frame.f_globals is not None:
+        frame = inspect.currentframe()
+        if frame is not None:
             upper = frame.f_globals.get("__package__", "")
             if not upper:
                 upper = frame.f_globals.get("__name__", "")
@@ -504,7 +495,7 @@ def shim(lower: str, upper: str | None = None, mount: str | None = None) -> None
             raise ValueError("Upper module name cannot be determined")
 
     # If mount not specified, use the upper module name
-    if mount is None and upper is not None:
+    if not mount and upper:
         mount = upper
 
     if not upper:
@@ -525,4 +516,4 @@ def shim(lower: str, upper: str | None = None, mount: str | None = None) -> None
     # This fixes issues when modules are mounted over their uppers
     if mount in sys.modules:
         del sys.modules[mount]
-        import_module(mount)
+        _ = import_module(mount)
