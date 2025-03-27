@@ -1,1 +1,1 @@
-"""Target package containing overlay modules."""
+"""Test suite."""

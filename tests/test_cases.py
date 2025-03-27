@@ -1,11 +1,13 @@
 """Various example test cases for modshim."""
 
+from types import ModuleType
+
 from modshim import shim
 
 
 def test_circular_import() -> None:
     """Test circular imports between modules using a third mount point.
-    
+
     This test verifies that circular dependencies can be resolved by shimming
     two modules onto a third mount point.
     """
@@ -15,7 +17,7 @@ def test_circular_import() -> None:
         "tests.cases.circular_c",
     )
     try:
-        import tests.cases.circular_c.layout
+        import tests.cases.circular_c.layout  # pyright: ignore [reportMissingImports]
 
         assert True
     except ImportError as exc:
@@ -23,12 +25,17 @@ def test_circular_import() -> None:
             "Import of `tests.cases.circular_c.layout` failed"
         ) from exc
 
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.circular_c, ModuleType)
+    assert isinstance(tests.cases.circular_c.layout, ModuleType)
+    assert isinstance(tests.cases.circular_c.layout.containers, ModuleType)
     assert hasattr(tests.cases.circular_c.layout.containers, "Container")
 
 
 def test_circular_import_overmount() -> None:
     """Test circular imports by mounting one module onto itself.
-    
+
     This test verifies that circular dependencies can be resolved by shimming
     one module onto itself, effectively overriding its own implementation.
     """
@@ -38,7 +45,7 @@ def test_circular_import_overmount() -> None:
         "tests.cases.circular_b",
     )
     try:
-        import tests.cases.circular_b.layout
+        import tests.cases.circular_b.layout  # pyright: ignore [reportMissingImports]
 
         assert True
     except ImportError as exc:
@@ -46,18 +53,23 @@ def test_circular_import_overmount() -> None:
             "Import of `tests.cases.circular_b.layout` failed"
         ) from exc
 
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.circular_b, ModuleType)
+    assert isinstance(tests.cases.circular_b.layout, ModuleType)
+    assert isinstance(tests.cases.circular_b.layout.containers, ModuleType)
     assert hasattr(tests.cases.circular_b.layout.containers, "Container")
 
 
 def test_circular_import_overmount_auto() -> None:
     """Test circular imports without explicit shimming.
-    
-    This test verifies that circular dependencies can be resolved 
+
+    This test verifies that circular dependencies can be resolved
     automatically without explicitly calling shim() in the test itself.
-    The shimming is likely handled in the conftest or module setup.
+    The shimming is handled in the module setup.
     """
     try:
-        import tests.cases.circular_b.layout
+        import tests.cases.circular_b.layout  # pyright: ignore [reportMissingImports]
 
         assert True
     except ImportError as exc:
@@ -65,4 +77,9 @@ def test_circular_import_overmount_auto() -> None:
             "Import of `tests.cases.circular_b.layout` failed"
         ) from exc
 
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.circular_b, ModuleType)
+    assert isinstance(tests.cases.circular_b.layout, ModuleType)
+    assert isinstance(tests.cases.circular_b.layout.containers, ModuleType)
     assert hasattr(tests.cases.circular_b.layout.containers, "Container")
