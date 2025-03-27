@@ -155,11 +155,13 @@ class ModShimLoader:
         """Initialize the loader.
 
         Args:
-            upper_module: The name of the upper module
-            lower_module: The name of the lower module
-            root_mount_point: The root mount point for import rewriting
+            lower_spec: The module spec for the lower module
+            upper_spec: The module spec for the upper module
+            lower_root: The root package name of the lower module
+            upper_root: The root package name of the upper module
+            mount_root: The root mount point for import rewriting
+            finder: The ModShimFinder instance that created this loader
         """
-        # AI! fix this docstring
         self.lower_spec = lower_spec
         self.upper_spec = upper_spec
         self.lower_root = lower_root
@@ -190,7 +192,17 @@ class ModShimLoader:
         return module
 
     def load_module(self, fullname: str) -> ModuleType:
-        # AI! Ad a docstring here
+        """Load a module by name.
+        
+        Args:
+            fullname: The full name of the module to load
+            
+        Returns:
+            The loaded module
+            
+        Raises:
+            ModuleNotFoundError: If the module cannot be found
+        """
         spec = find_spec(fullname)
         if spec is None:
             raise ModuleNotFoundError()
@@ -201,11 +213,12 @@ class ModShimLoader:
 
         Args:
             code: The source code to rewrite
+            search: The root package name to search for
+            replace: The root package name to replace with
 
         Returns:
             Rewritten source code
         """
-        # AI Fix this docstring
         tree = ast.parse(code)
 
         # Use the new transformer that handles both imports and module references
