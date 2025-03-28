@@ -40,6 +40,7 @@ def test_multiple_registrations() -> None:
     # First registration
     shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_multiple")
     import json_multiple
+
     result1 = json_multiple.dumps({"test": "value"})
     assert result1 == "{'test': 'value'}"
 
@@ -49,8 +50,13 @@ def test_multiple_registrations() -> None:
     assert result2 == "{'test': 'value'}"
 
     # Third registration with same module but different name
-    shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_multiple_other")
+    shim(
+        lower="json",
+        upper="tests.examples.json_single_quotes",
+        mount="json_multiple_other",
+    )
     import json_multiple_other
+
     result3 = json_multiple_other.dumps({"test": "value"})
     assert result3 == "{'test': 'value'}"
 
@@ -90,7 +96,11 @@ def test_concurrent_shims() -> None:
 def test_concurrent_access() -> None:
     """Test that multiple threads can safely access the same shim."""
     # Create a single shim first
-    shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_shim_shared")
+    shim(
+        lower="json",
+        upper="tests.examples.json_single_quotes",
+        mount="json_shim_shared",
+    )
     import json_shim_shared
 
     def use_shim() -> str:
@@ -128,7 +138,11 @@ def test_error_handling() -> None:
     """Test error cases and edge conditions."""
     # Test with invalid lower module
     with pytest.raises(ImportError):
-        shim(lower="nonexistent", upper="tests.examples.json_single_quotes", mount="json_error")
+        shim(
+            lower="nonexistent",
+            upper="tests.examples.json_single_quotes",
+            mount="json_error",
+        )
 
     # Test with invalid module names
     with pytest.raises(ValueError, match="Upper module name cannot be empty"):
@@ -218,7 +232,6 @@ def test_package_paths() -> None:
     from pathlib_paths import Path  # type: ignore [reportMissingImports]
 
     assert hasattr(Path, "is_empty")
-
 
 
 def test_context_preservation() -> None:
