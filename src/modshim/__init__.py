@@ -5,7 +5,6 @@ that includes functionality from both. Internal imports are redirected to the mo
 """
 
 from __future__ import annotations
-
 import ast
 import logging
 import os
@@ -358,6 +357,8 @@ class ModShimFinder(MetaPathFinder):
 
     # Dictionary mapping mount points to (upper_module, lower_module) tuples
     _mappings: ClassVar[dict[str, tuple[str, str]]] = {}
+    # Thread-local storage to track internal find_spec calls
+    _internal_call: ClassVar[threading.local] = threading.local()
 
     @classmethod
     def register_mapping(
@@ -380,6 +381,11 @@ class ModShimFinder(MetaPathFinder):
         target: ModuleType | None = None,
     ) -> ModuleSpec | None:
         """Find a module spec for the given module name."""
+        # If this find_spec is called internally from _create_spec, ignore it
+        # to allow standard finders to locate the original lower/upper modules.
+        if getattr(self._internal_call, "active", False):
+            return None
+
         log.debug("Find spec called for %r", fullname)
         # Check if this module is already being imported
         if fullname in sys.modules:
@@ -409,14 +415,11 @@ class ModShimFinder(MetaPathFinder):
         lower_name = fullname.replace(mount_root, lower_root)
         upper_name = fullname.replace(mount_root, upper_root)
 
-        # Temporarily disable the finder when loading the specs
-        restore_finder = False
+        # Set flag indicating we are performing an internal lookup
+        self._internal_call.active = True
         try:
-            if self in sys.meta_path:
-                restore_finder = True
-                sys.meta_path.remove(self)
-
-            # Find upper and lower specs
+            # Find upper and lower specs using standard finders
+            # (Our finder will ignore calls while _internal_call.active is True)
             try:
                 log.debug("Finding lower spec %r", lower_name)
                 lower_spec = find_spec(lower_name)
@@ -426,17 +429,15 @@ class ModShimFinder(MetaPathFinder):
             try:
                 log.debug("Finding upper spec %r", upper_name)
                 upper_spec = find_spec(upper_name)
-                # if upper_spec and isinstance(upper_spec.loader, ModShimLoader):
-                #     upper_spec = upper_spec.loader.upper_spec
             except (ImportError, AttributeError):
                 upper_spec = None
             log.debug("Found upper spec %r", upper_spec)
 
         finally:
-            # Restore the finder
-            if restore_finder:
-                sys.meta_path.insert(0, self)
+            # Unset the internal call flag
+            self._internal_call.active = False
 
+        # Create loader and spec using the correctly found specs
         loader = ModShimLoader(
             lower_spec, upper_spec, lower_root, upper_root, mount_root, finder=self
         )
