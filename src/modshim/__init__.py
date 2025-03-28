@@ -383,15 +383,12 @@ class ModShimFinder(MetaPathFinder):
         target: ModuleType | None = None,
     ) -> ModuleSpec | None:
         """Find a module spec for the given module name."""
+        log.debug("Find spec called for %r", fullname)
+
         # If this find_spec is called internally from _create_spec, ignore it
         # to allow standard finders to locate the original lower/upper modules.
         if getattr(self._internal_call, "active", False):
             return None
-
-        log.debug("Find spec called for %r", fullname)
-        # Check if this module is already being imported
-        if fullname in sys.modules:
-            return None  # Let Python continue with normal import
 
         # Check if this is a direct mount point
         if fullname in self._mappings:
