@@ -5,10 +5,12 @@ that includes functionality from both. Internal imports are redirected to the mo
 """
 
 from __future__ import annotations
+
 import ast
 import logging
 import os
 import sys
+import threading
 from importlib import import_module
 from importlib.abc import InspectLoader, Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
@@ -466,6 +468,10 @@ class ModShimFinder(MetaPathFinder):
         return spec
 
 
+# Thread-local storage to track function execution state
+_shim_state = threading.local()
+
+
 def shim(lower: str, upper: str = "", mount: str = "") -> None:
     """Mount an upper module or package on top of a lower module or package.
 
@@ -481,45 +487,59 @@ def shim(lower: str, upper: str = "", mount: str = "") -> None:
     Returns:
         The combined module or package
     """
-    # Validate module names
-    if not lower:
-        raise ValueError("Lower module name cannot be empty")
+    # Check if we're already inside this function in the current thread
+    # This prevents `shim` calls in modules from triggering recursion loops for
+    # auto-shimming modules
+    if getattr(_shim_state, "active", False):
+        # We're already running this function, so skip
+        return None
 
-    # Use calling package name if 'upper' parameter name is empty
-    if not upper:
-        import inspect
+    try:
+        # Mark that we're now running this function
+        _shim_state.active = True  # Validate module names
 
-        # Get the caller's frame to find its module
-        frame = inspect.currentframe()
-        if frame is not None:
-            upper = frame.f_globals.get("__package__", "")
-            if not upper:
-                upper = frame.f_globals.get("__name__", "")
-                if upper == "__main__":
-                    raise ValueError("Cannot determine package name from __main__")
+        if not lower:
+            raise ValueError("Lower module name cannot be empty")
+
+        # Use calling package name if 'upper' parameter name is empty
         if not upper:
-            raise ValueError("Upper module name cannot be determined")
+            import inspect
 
-    # If mount not specified, use the upper module name
-    if not mount and upper:
-        mount = upper
+            # Get the caller's frame to find its module
+            frame = inspect.currentframe()
+            if frame is not None:
+                upper = frame.f_globals.get("__package__", "")
+                if not upper:
+                    upper = frame.f_globals.get("__name__", "")
+                    if upper == "__main__":
+                        raise ValueError("Cannot determine package name from __main__")
+            if not upper:
+                raise ValueError("Upper module name cannot be determined")
 
-    if not upper:
-        raise ValueError("Upper module name cannot be empty")
-    if not lower:
-        raise ValueError("Lower module name cannot be empty")
-    if not mount:
-        raise ValueError("Mount point cannot be empty")
+        # If mount not specified, use the upper module name
+        if not mount and upper:
+            mount = upper
 
-    # Register our finder in sys.meta_path if not already there
-    if not any(isinstance(finder, ModShimFinder) for finder in sys.meta_path):
-        sys.meta_path.insert(0, ModShimFinder())
+        if not upper:
+            raise ValueError("Upper module name cannot be empty")
+        if not lower:
+            raise ValueError("Lower module name cannot be empty")
+        if not mount:
+            raise ValueError("Mount point cannot be empty")
 
-    # Register the mapping for this mount point
-    ModShimFinder.register_mapping(mount, upper, lower)
+        # Register our finder in sys.meta_path if not already there
+        if not any(isinstance(finder, ModShimFinder) for finder in sys.meta_path):
+            sys.meta_path.insert(0, ModShimFinder())
 
-    # Re-import the mounted module if it has already been imported
-    # This fixes issues when modules are mounted over their uppers
-    if mount in sys.modules:
-        del sys.modules[mount]
-        _ = import_module(mount)
+        # Register the mapping for this mount point
+        ModShimFinder.register_mapping(mount, upper, lower)
+
+        # Re-import the mounted module if it has already been imported
+        # This fixes issues when modules are mounted over their uppers
+        if mount in sys.modules:
+            del sys.modules[mount]
+            _ = import_module(mount)
+
+    finally:
+        # Always clear the running flag when we exit
+        _shim_state.active = False
