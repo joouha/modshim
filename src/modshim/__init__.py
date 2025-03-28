@@ -7,7 +7,6 @@ that includes functionality from both. Internal imports are redirected to the mo
 from __future__ import annotations
 
 import ast
-import threading
 import logging
 import os
 import sys
@@ -359,8 +358,6 @@ class ModShimFinder(MetaPathFinder):
 
     # Dictionary mapping mount points to (upper_module, lower_module) tuples
     _mappings: ClassVar[dict[str, tuple[str, str]]] = {}
-    # Lock for thread-safe modification of sys.meta_path
-    _meta_path_lock: ClassVar[threading.RLock] = threading.RLock()
 
     @classmethod
     def register_mapping(
@@ -412,38 +409,34 @@ class ModShimFinder(MetaPathFinder):
         lower_name = fullname.replace(mount_root, lower_root)
         upper_name = fullname.replace(mount_root, upper_root)
 
-        lower_spec = None
-        upper_spec = None
-        # Temporarily disable the finder when loading the specs (thread-safe)
+        # Temporarily disable the finder when loading the specs
         restore_finder = False
-        # Acquire lock before checking/modifying sys.meta_path
-        with self._meta_path_lock:
+        try:
+            if self in sys.meta_path:
+                restore_finder = True
+                sys.meta_path.remove(self)
+
+            # Find upper and lower specs
             try:
-                if self in sys.meta_path:
-                    restore_finder = True
-                    sys.meta_path.remove(self)
+                log.debug("Finding lower spec %r", lower_name)
+                lower_spec = find_spec(lower_name)
+            except (ImportError, AttributeError):
+                lower_spec = None
+            log.debug("Found lower spec %r", lower_spec)
+            try:
+                log.debug("Finding upper spec %r", upper_name)
+                upper_spec = find_spec(upper_name)
+                # if upper_spec and isinstance(upper_spec.loader, ModShimLoader):
+                #     upper_spec = upper_spec.loader.upper_spec
+            except (ImportError, AttributeError):
+                upper_spec = None
+            log.debug("Found upper spec %r", upper_spec)
 
-                # Find upper and lower specs (now finder is removed safely)
-                try:
-                    log.debug("Finding lower spec %r", lower_name)
-                    lower_spec = find_spec(lower_name)
-                except (ImportError, AttributeError):
-                    lower_spec = None
-                log.debug("Found lower spec %r", lower_spec)
-                try:
-                    log.debug("Finding upper spec %r", upper_name)
-                    upper_spec = find_spec(upper_name)
-                except (ImportError, AttributeError):
-                    upper_spec = None
-                log.debug("Found upper spec %r", upper_spec)
+        finally:
+            # Restore the finder
+            if restore_finder:
+                sys.meta_path.insert(0, self)
 
-            finally:
-                # Restore the finder if it was removed
-                if restore_finder and self not in sys.meta_path:
-                    sys.meta_path.insert(0, self)
-            # Lock is released automatically by 'with' statement
-
-        # Create loader and spec using the correctly found specs
         loader = ModShimLoader(
             lower_spec, upper_spec, lower_root, upper_root, mount_root, finder=self
         )
@@ -517,10 +510,9 @@ def shim(lower: str, upper: str = "", mount: str = "") -> None:
     if not mount:
         raise ValueError("Mount point cannot be empty")
 
-    # Register our finder in sys.meta_path if not already there (thread-safe)
-    with ModShimFinder._meta_path_lock:
-        if not any(isinstance(finder, ModShimFinder) for finder in sys.meta_path):
-            sys.meta_path.insert(0, ModShimFinder())
+    # Register our finder in sys.meta_path if not already there
+    if not any(isinstance(finder, ModShimFinder) for finder in sys.meta_path):
+        sys.meta_path.insert(0, ModShimFinder())
 
     # Register the mapping for this mount point
     ModShimFinder.register_mapping(mount, upper, lower)
