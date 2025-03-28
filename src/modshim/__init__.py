@@ -248,7 +248,7 @@ class ModShimLoader(Loader):
             # First try to get the source code
             lower_source = get_module_source(lower_name, lower_spec)
 
-            if lower_source:
+            if lower_source is not None:
                 # Rewrite imports using the root package name
                 lower_source = self.rewrite_module_code(
                     lower_source, self.lower_root, self.mount_root
@@ -294,6 +294,8 @@ class ModShimLoader(Loader):
                         if not k.startswith("__")
                     }
                 )
+        else:
+            log.debug("No lower spec to execute")
 
         # Copy module state to working module
         working_module.__dict__.update(
@@ -408,8 +410,10 @@ class ModShimFinder(MetaPathFinder):
         upper_name = fullname.replace(mount_root, upper_root)
 
         # Temporarily disable the finder when loading the specs
+        restore_finder = False
         try:
             if self in sys.meta_path:
+                restore_finder = True
                 sys.meta_path.remove(self)
 
             # Find upper and lower specs
@@ -430,7 +434,8 @@ class ModShimFinder(MetaPathFinder):
 
         finally:
             # Restore the finder
-            sys.meta_path.insert(0, self)
+            if restore_finder:
+                sys.meta_path.insert(0, self)
 
         loader = ModShimLoader(
             lower_spec, upper_spec, lower_root, upper_root, mount_root, finder=self
