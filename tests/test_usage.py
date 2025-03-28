@@ -66,8 +66,6 @@ def test_concurrent_shims() -> None:
 
     def create_and_use_shim(i: int) -> str:
         # Create unique module names for this thread
-        upper = "tests.examples.json_single_quotes"
-        lower = "json"
         mount = f"json_shim_{i}"
 
         shim(lower="json", upper="tests.examples.json_single_quotes", mount=mount)
