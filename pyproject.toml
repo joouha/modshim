@@ -15,10 +15,10 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "basedpyright>=1.28.4",
     "codespell>=2.4.1",
     "pre-commit>=4.1.0",
     "pre-commit-hooks>=5.0.0",
+    "pyright>=1.1.398",
     "pytest>=4.6.11",
     "ruff>=0.0.17",
 ]

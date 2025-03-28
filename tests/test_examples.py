@@ -395,7 +395,9 @@ def test_pathlib_is_empty_overmount() -> None:
     import tempfile
     from pathlib import Path
 
-    from tests.examples.pathlib_is_empty import Path as PathTest
+    from tests.examples.pathlib_is_empty import (
+        Path as PathTest,  # type:ignore [reportMissingImports]
+    )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create test files and directories

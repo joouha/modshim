@@ -36,7 +36,7 @@ def test_multiple_registrations() -> None:
     """Test behavior when registering the same module multiple times."""
     # First registration
     shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_multiple")
-    import json_multiple
+    import json_multiple  # type: ignore [reportMissingImports]
 
     result1 = json_multiple.dumps({"test": "value"})
     assert result1 == "{'test': 'value'}"
@@ -52,7 +52,7 @@ def test_multiple_registrations() -> None:
         upper="tests.examples.json_single_quotes",
         mount="json_multiple_other",
     )
-    import json_multiple_other
+    import json_multiple_other  # type: ignore [reportMissingImports]
 
     result3 = json_multiple_other.dumps({"test": "value"})
     assert result3 == "{'test': 'value'}"
@@ -95,7 +95,7 @@ def test_concurrent_access() -> None:
         upper="tests.examples.json_single_quotes",
         mount="json_shim_shared",
     )
-    import json_shim_shared
+    import json_shim_shared  # type: ignore [reportMissingImports]
 
     def use_shim() -> str:
         result = json_shim_shared.dumps({"test": "value"})
@@ -131,7 +131,7 @@ def test_nested_module_imports() -> None:
 def test_attribute_access() -> None:
     """Test various attribute access patterns on shimmed modules."""
     shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_attrs")
-    import json_attrs
+    import json_attrs  # type: ignore [reportMissingImports]
 
     # Test accessing non-existent attribute
     with pytest.raises(AttributeError):
@@ -153,7 +153,7 @@ def test_module_reload() -> None:
 
     # Create a shim
     shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_reload")
-    import json_reload
+    import json_reload  # type: ignore [reportMissingImports]
 
     # Test initial behavior
     initial_result = json_reload.dumps({"test": "value"})
@@ -174,7 +174,7 @@ def test_module_reload() -> None:
     assert reloaded is json_reload
 
     # Verify it's still accessible through normal import
-    import json_reload as jr_again
+    import json_reload as jr_again  # type: ignore [reportMissingImports]
 
     assert jr_again is json_reload
 
@@ -184,7 +184,7 @@ def test_package_paths() -> None:
     shim(
         upper="tests.examples.pathlib_is_empty", lower="pathlib", mount="pathlib_paths"
     )
-    import pathlib_paths as merged
+    import pathlib_paths as merged  # type: ignore [reportMissingImports]
 
     # Verify package attributes are set correctly
     assert hasattr(merged, "__path__")
@@ -199,7 +199,7 @@ def test_package_paths() -> None:
 def test_context_preservation() -> None:
     """Test that module context (__file__, __package__, etc.) is preserved."""
     shim(upper="tests.examples.json_single_quotes", lower="json", mount="json_context")
-    import json_context as merged
+    import json_context as merged  # type: ignore [reportMissingImports]
 
     # Verify important context attributes
     assert hasattr(merged, "__file__")
