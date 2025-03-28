@@ -341,7 +341,7 @@ def test_datetime_custom_override_overmount() -> None:
 
     # Test MAXDATE modification
     with pytest.raises(ValueError, match="year must be in 1..3000"):
-        datetime_custom(9999, 1, 1)
+        _ = datetime_custom(9999, 1, 1)
 
     # Original datetime should be unaffected
     assert isinstance(datetime.now(), datetime)
@@ -395,9 +395,7 @@ def test_pathlib_is_empty_overmount() -> None:
     import tempfile
     from pathlib import Path
 
-    from tests.examples.pathlib_is_empty import (
-        Path as PathTest,  # type: ignore [reportMissingImports]
-    )
+    from tests.examples.pathlib_is_empty import Path as PathTest
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create test files and directories
@@ -546,10 +544,10 @@ id,name,date,score
     assert rows[2]["date"].year == 2024
 
     # Verify original csv remains unaffected
-    csv_data.seek(0)
+    _ = csv_data.seek(0)
     # Verify original DictReader rejects schema parameter
     with pytest.raises(TypeError):
-        original_csv.DictReader(csv_data, schema=schema)  # type: ignore [reportCallIssue]
+        _ = original_csv.DictReader(csv_data, schema=schema)  # type: ignore [reportCallIssue]
     original_reader = original_csv.DictReader(csv_data)
     original_row = next(original_reader)
     assert isinstance(original_row["id"], str)  # Still strings
