@@ -196,6 +196,20 @@ def test_package_paths() -> None:
     assert hasattr(Path, "is_empty")
 
 
+def test_import_error_on_nonexistent_submodule() -> None:
+    """Test that ImportError is raised when importing a non-existent submodule."""
+    # Create a shim with a known module
+    shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_import_error")
+    
+    # Attempt to import a non-existent submodule
+    with pytest.raises(ImportError):
+        from json_import_error import non_existent_submodule  # type: ignore [reportMissingImports]
+    
+    # Also test using __import__
+    with pytest.raises(ImportError):
+        __import__("json_import_error.non_existent_submodule")
+
+
 def test_context_preservation() -> None:
     """Test that module context (__file__, __package__, etc.) is preserved."""
     shim(upper="tests.examples.json_single_quotes", lower="json", mount="json_context")
