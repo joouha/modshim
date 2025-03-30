@@ -196,6 +196,20 @@ def test_package_paths() -> None:
     assert hasattr(Path, "is_empty")
 
 
+def test_nonexistent_modules() -> None:
+    """Test that ImportError is raised when neither upper nor lower module exists."""
+    # Create a shim with non-existent modules
+    shim(lower="nonexistent_lower", upper="nonexistent_upper", mount="nonexistent_mount")
+    
+    # Attempt to import the non-existent module
+    with pytest.raises(ImportError):
+        import nonexistent_mount  # type: ignore [reportMissingImports]
+        
+    # Also test using __import__
+    with pytest.raises(ImportError):
+        __import__("nonexistent_mount")
+
+
 def test_import_error_on_nonexistent_submodule() -> None:
     """Test that ImportError is raised when importing a non-existent submodule."""
     # Create a shim with a known module

@@ -433,6 +433,10 @@ class ModShimFinder(MetaPathFinder):
         finally:
             # Unset the internal call flag
             self._internal_call.active = False
+            
+        # Raise ImportError if neither module exists
+        if lower_spec is None and upper_spec is None:
+            raise ImportError(f"Cannot find module '{fullname}' (tried '{lower_name}' and '{upper_name}')")
 
         # Create loader and spec using the correctly found specs
         loader = ModShimLoader(
