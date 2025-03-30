@@ -67,15 +67,23 @@ True
 
 ## How It Works
 
-`modshim` creates virtual merged modules by intercepting Python's import system. When a shimmed module is imported, modshim combines the original module with your enhancements, making your modifications appear as if they were part of the original module while preserving all existing functionality.
+`modshim` creates virtual merged modules by intercepting Python's import system. When a shimmed module is imported, modshim combines the original module with your enhancements through AST (Abstract Syntax Tree) transformations.
 
-At its core, modshim works by installing a custom import finder into Python's import machinery. When you call `shim()`, it creates a finder that watches for imports of your specified merged module name. When that module is imported, the finder loads both the original module and your enhancement module, then creates a new virtual module that combines them.
+At its core, modshim works by installing a custom import finder (`ModShimFinder`) into Python's import machinery. When you call `shim()`, it registers a mapping between three module names: the "lower" (original) module, the "upper" (enhancement) module, and the "mount" point (the name under which the combined module will be accessible).
 
-The merging process gives priority to your enhancements - any attributes you define (functions, classes, constants, etc.) override the originals, while all other attributes from the original module remain unchanged. This merged view is completely transparent to code using the module - it behaves exactly like a normal Python module.
+When the mount module is imported, the finder:
 
-Importantly, modshim automatically handles sub-modules recursively. If the original module has sub-modules (like `json.encoder`), modshim will create corresponding merged versions of those sub-modules too. This ensures that imports within the original module continue to work correctly, maintaining consistency throughout the module hierarchy.
+1. Locates both the lower and upper modules using Python's standard import machinery
+2. Creates a new virtual module at the mount point
+3. Executes the lower module's code first, establishing the base functionality
+4. Executes the upper module's code, which can override or extend the lower module's attributes
+5. Handles imports within these modules by rewriting their ASTs to redirect internal imports to the mount point
 
-The system is thread-safe and handles complex scenarios like relative imports and module reloading. All of this happens without modifying any source code - the original modules remain untouched on disk, making modshim a clean alternative to vendoring code.
+The AST transformation is particularly important - it ensures that when code in either module imports from its own package, those imports are redirected to the combined module. This maintains consistency throughout the module hierarchy and prevents circular import issues.
+
+Modshim automatically handles sub-modules recursively. If the original module has sub-modules (like `json.encoder`), modshim will create corresponding merged versions of those sub-modules too, ensuring that the entire package structure works seamlessly.
+
+The system is thread-safe, handles circular imports, and properly manages module caching. All of this happens without modifying any source code on disk - the original modules remain untouched, making modshim a clean alternative to vendoring code.
 
 ## Creating Enhancement Packages
 
