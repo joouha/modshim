@@ -299,9 +299,7 @@ class ModShimLoader(Loader):
             log.debug("No lower spec to execute")
 
         # Copy module state to working module
-        working_module.__dict__.update(
-            {k: v for k, v in module.__dict__.items() if not k.startswith("__")}
-        )
+        working_module.__dict__.update(module.__dict__)
 
         # Load and execute upper module
         if upper_spec := self.upper_spec:
