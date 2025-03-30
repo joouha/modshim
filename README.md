@@ -19,7 +19,7 @@ pip install modshim
 
 ## Usage
 
-Suppose we want to add a `is_weekend` property to `datetime` objects.
+Suppose we want to add a `is_weekend` property to `datetime` objects, and change the maximum allowed year.
 
 First create a Python module containing your modifications, following the same module layout as the builtin `datetime` module:
 
@@ -29,7 +29,7 @@ First create a Python module containing your modifications, following the same m
 # You can import from the target module in your overlay
 from datetime import datetime as OriginalDateTime
 
-# Objects can be override by simply declaring new version with the same name
+# Objects can be override by simply re-declaring them with the same name
 MAX_YEAR = 3_000
 
 # Sub-classes can be used to override and extend functionality
@@ -59,6 +59,8 @@ We can then import and use the new `datetime_mod` instead of the built in `datet
 >>> from datetime_mod import MAX_YEAR, datetime
 >> MAX_YEAR
 3000
+>> datetime(3001, 1, 1)
+ValueError: ('year must be in 1..3000', 3001)
 >> datetime(2024, 1, 6).is_weekend
 True
 ```
