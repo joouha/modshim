@@ -16,7 +16,7 @@ from importlib.abc import InspectLoader, Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import find_spec, module_from_spec
 from types import ModuleType
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -42,7 +42,6 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
         self.search: str = search
         self.replace: str = replace
 
-    @override
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.ImportFrom:
         """Rewrite 'from X import Y' statements."""
         # If this is an import from the original module or its submodules,
@@ -61,7 +60,6 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             return ast.ImportFrom(module=new_module, names=node.names, level=node.level)
         return node
 
-    @override
     def visit_Import(self, node: ast.Import) -> ast.Import:
         """Rewrite 'import X' statements."""
         new_names: list[ast.alias] = []
@@ -81,7 +79,6 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             return ast.Import(names=new_names)
         return node
 
-    @override
     def visit_Attribute(self, node: ast.AST) -> ast.AST:
         """Rewrite module references like 'urllib.response' to 'urllib_punycode.response'."""
         # First visit any child nodes
@@ -176,7 +173,6 @@ class ModShimLoader(Loader):
         self.mount_root: str = mount_root
         self.finder: ModShimFinder = finder
 
-    @override
     def create_module(self, spec: ModuleSpec) -> ModuleType:
         """Create a new module object."""
         key = spec.name, self.mount_root
@@ -219,7 +215,6 @@ class ModShimLoader(Loader):
 
         return ast.unparse(transformed_tree)
 
-    @override
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by combining upper and lower modules."""
         log.debug("Exec_module called for %r", module.__name__)
@@ -373,7 +368,6 @@ class ModShimFinder(MetaPathFinder):
         """
         cls._mappings[mount_root] = (upper_root, lower_root)
 
-    @override
     def find_spec(
         self,
         fullname: str,
@@ -433,10 +427,12 @@ class ModShimFinder(MetaPathFinder):
         finally:
             # Unset the internal call flag
             self._internal_call.active = False
-            
+
         # Raise ImportError if neither module exists
         if lower_spec is None and upper_spec is None:
-            raise ImportError(f"Cannot find module '{fullname}' (tried '{lower_name}' and '{upper_name}')")
+            raise ImportError(
+                f"Cannot find module '{fullname}' (tried '{lower_name}' and '{upper_name}')"
+            )
 
         # Create loader and spec using the correctly found specs
         loader = ModShimLoader(
