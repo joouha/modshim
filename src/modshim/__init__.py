@@ -41,6 +41,7 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
         super().__init__()
         self.search: str = search
         self.replace: str = replace
+        self.dirty = False
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.ImportFrom:
         """Rewrite 'from X import Y' statements."""
@@ -57,6 +58,7 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
                 suffix = node.module[len(self.search) :]
                 new_module = f"{self.replace}{suffix}"
 
+            self.dirty = True
             return ast.ImportFrom(module=new_module, names=node.names, level=node.level)
         return node
 
@@ -76,6 +78,7 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
                 new_names.append(name)
 
         if new_names:
+            self.dirty = True
             return ast.Import(names=new_names)
         return node
 
@@ -91,6 +94,7 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
             and node.value.id == self.search
         ):
             # Replace the module name with the mount point
+            self.dirty = True
             return ast.Attribute(
                 value=ast.Name(id=self.replace, ctx=node.value.ctx),
                 attr=node.attr,
@@ -114,6 +118,7 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
                 for attr, ctx in attrs:
                     result = ast.Attribute(value=result, attr=attr, ctx=ctx)
 
+                self.dirty = True
                 return result
 
         return node
@@ -195,27 +200,9 @@ class ModShimLoader(Loader):
 
         return module
 
-    def needs_transformation(self, code: str, search: str) -> bool:
-        """Check if code contains references to the module we need to transform.
-
-        Args:
-            code: The source code to check
-            search: The module name to search for
-
-        Returns:
-            True if the code contains references to the module, False otherwise
-        """
-        # Quick string check before expensive AST parsing
-        if search not in code:
-            return False
-
-        # More precise check using regex to find actual imports
-        import re
-
-        pattern = rf"(import\s+{re.escape(search)}|from\s+{re.escape(search)}[\s.]|{re.escape(search)}\s*\.)"
-        return bool(re.search(pattern, code))
-
-    def rewrite_module_code(self, code: str, search: str, replace: str) -> str:
+    def rewrite_module_code(
+        self, code: str, search: str, replace: str
+    ) -> tuple[str, bool]:
         """Rewrite imports and module references in module code.
 
         Args:
@@ -224,19 +211,18 @@ class ModShimLoader(Loader):
             replace: The root package name to replace with
 
         Returns:
-            Rewritten source code
+            Tuple of the rewritten source code and a bool signifying if any
+                modifications have been made
         """
-        if not self.needs_transformation(code, search):
-            return code
-
         tree = ast.parse(code)
 
         # Use the new transformer that handles both imports and module references
         transformer = ModuleReferenceRewriter(search, replace)
         transformed_tree: ast.AST = transformer.visit(tree)
+        if not transformer.dirty:
+            return code, False
         _ = ast.fix_missing_locations(transformed_tree)
-
-        return ast.unparse(transformed_tree)
+        return ast.unparse(transformed_tree), True
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by combining upper and lower modules."""
@@ -252,24 +238,12 @@ class ModShimLoader(Loader):
         lower_name = module.__name__.replace(self.mount_root, self.lower_root)
         upper_name = module.__name__.replace(self.mount_root, self.upper_root)
 
-        # Create a working copy of the module's state after executing the lower module
-        parts = module.__name__.split(".")
-        working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
-        working_module = ModuleType(working_name)
-        working_module.__name__ = working_name
-        working_module.__file__ = getattr(module, "__file__", None)
-        working_module.__package__ = getattr(module, "__package__", None)
-
-        # Register the modules in sys.modules
-        sys.modules[working_name] = working_module
-
         if lower_spec := self.lower_spec:
             # First try to get the source code
             lower_source = get_module_source(lower_name, lower_spec)
 
             if lower_source is not None:
-                # Only transform if needed
-                lower_source = self.rewrite_module_code(
+                lower_source, _ = self.rewrite_module_code(
                     lower_source, self.lower_root, self.mount_root
                 )
 
@@ -278,8 +252,7 @@ class ModShimLoader(Loader):
                 try:
                     log.debug("Executing lower: %r", self.lower_spec.name)
                     exec(  # noqa: S102
-                        compile(lower_source, lower_filename, "exec"),
-                        module.__dict__,
+                        compile(lower_source, lower_filename, "exec"), module.__dict__
                     )
                 except:
                     import linecache
@@ -293,16 +266,8 @@ class ModShimLoader(Loader):
                     )
                     raise
 
-            elif lower_spec.loader and isinstance(lower_spec.loader, InspectLoader):
-                # Fall back to compiled code if source is not available
-                try:
-                    lower_code = lower_spec.loader.get_code(lower_name)
-                    if lower_code:
-                        exec(lower_code, module.__dict__)  # noqa: S102
-                except (ImportError, AttributeError):
-                    pass
+            # If all else fails, execute the lower module natively then copy its attributes
             elif lower_spec.loader:
-                # If all else fails, execute the lower module then copy its attributes
                 lower_module = module_from_spec(lower_spec)
                 lower_spec.loader.exec_module(lower_module)
                 # Copy attributes
@@ -316,25 +281,44 @@ class ModShimLoader(Loader):
         else:
             log.debug("No lower spec to execute")
 
-        # Copy module state to working module
-        working_module.__dict__.update(module.__dict__)
-
         # Load and execute upper module
         if upper_spec := self.upper_spec:
             # First try to get the source code
             upper_source = get_module_source(upper_name, upper_spec)
 
             if upper_source:
-                # Only transform if needed
-                upper_source = self.rewrite_module_code(
+                # Parse upper code
+                # Rewrite imports of lower to mount
+                upper_source, _ = self.rewrite_module_code(
                     upper_source, self.lower_root, self.mount_root
                 )
 
+                # Generate name of working module
+                parts = module.__name__.split(".")
+                working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
+
                 # Rewrite import of the current module to the working module to prevent
                 # recursion errors
-                upper_source = self.rewrite_module_code(
+                working_source, modified = self.rewrite_module_code(
                     upper_source, module.__name__, working_name
                 )
+                # If the current module is imported, then create the working module
+                if modified:
+                    # If the upper imports from the upper, we create a working copy of the
+                    # current module to avoid circular import errors
+                    upper_source = working_source
+
+                    # Create a working copy of the module's state after executing the lower module
+                    working_module = ModuleType(working_name)
+                    working_module.__name__ = working_name
+                    working_module.__file__ = getattr(module, "__file__", None)
+                    working_module.__package__ = getattr(module, "__package__", None)
+
+                    # Copy module state to working module
+                    working_module.__dict__.update(module.__dict__)
+
+                    # Register the modules in sys.modules
+                    sys.modules[working_name] = working_module
 
                 # Execute the code with the filename that matches the line cache entry
                 upper_filename = f"{module.__file__}::{upper_spec.origin}"
@@ -344,7 +328,7 @@ class ModShimLoader(Loader):
                         compile(upper_source, upper_filename, "exec"),
                         module.__dict__,
                     )
-                except Exception:
+                except:
                     import linecache
 
                     # Add the source to the line cache on error for better error reporting
@@ -364,6 +348,8 @@ class ModShimLoader(Loader):
 
                 except (ImportError, AttributeError):
                     pass
+        else:
+            log.debug("No upper spec to execute")
 
         # Remove this module from processing set
         self._processing.discard(module)
