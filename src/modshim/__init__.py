@@ -195,6 +195,26 @@ class ModShimLoader(Loader):
 
         return module
 
+    def needs_transformation(self, code: str, search: str) -> bool:
+        """Check if code contains references to the module we need to transform.
+
+        Args:
+            code: The source code to check
+            search: The module name to search for
+
+        Returns:
+            True if the code contains references to the module, False otherwise
+        """
+        # Quick string check before expensive AST parsing
+        if search not in code:
+            return False
+
+        # More precise check using regex to find actual imports
+        import re
+
+        pattern = rf"(import\s+{re.escape(search)}|from\s+{re.escape(search)}[\s.]|{re.escape(search)}\s*\.)"
+        return bool(re.search(pattern, code))
+
     def rewrite_module_code(self, code: str, search: str, replace: str) -> str:
         """Rewrite imports and module references in module code.
 
@@ -206,6 +226,9 @@ class ModShimLoader(Loader):
         Returns:
             Rewritten source code
         """
+        if not self.needs_transformation(code, search):
+            return code
+
         tree = ast.parse(code)
 
         # Use the new transformer that handles both imports and module references
@@ -245,7 +268,7 @@ class ModShimLoader(Loader):
             lower_source = get_module_source(lower_name, lower_spec)
 
             if lower_source is not None:
-                # Rewrite imports using the root package name
+                # Only transform if needed
                 lower_source = self.rewrite_module_code(
                     lower_source, self.lower_root, self.mount_root
                 )
@@ -302,10 +325,11 @@ class ModShimLoader(Loader):
             upper_source = get_module_source(upper_name, upper_spec)
 
             if upper_source:
-                # Rewrite imports using the root package name
+                # Only transform if needed
                 upper_source = self.rewrite_module_code(
                     upper_source, self.lower_root, self.mount_root
                 )
+
                 # Rewrite import of the current module to the working module to prevent
                 # recursion errors
                 upper_source = self.rewrite_module_code(
