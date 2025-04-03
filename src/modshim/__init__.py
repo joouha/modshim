@@ -28,20 +28,12 @@ if os.getenv("MODSHIM_DEBUG"):
     logging.basicConfig(level=logging.DEBUG)
 
 
-class ModuleReferenceRewriter(ast.NodeTransformer):
+class _ModuleReferenceRewriter(ast._Unparser, ast.NodeTransformer):  #  pyright: ignore[reportAttributeAccessIssue]
     """AST transformer that rewrites module references to point to the mount point."""
 
-    def __init__(self, search: str, replace: str) -> None:
-        """Initialize the rewriter.
-
-        Args:
-            search: The root package name of the module being rewritten
-            replace: The name package name to use as the replacement
-        """
-        super().__init__()
-        self.search: str = search
-        self.replace: str = replace
-        self.dirty = False
+    search: str
+    replace: str
+    dirty: bool = False
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.ImportFrom:
         """Rewrite 'from X import Y' statements."""
@@ -59,8 +51,8 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
                 new_module = f"{self.replace}{suffix}"
 
             self.dirty = True
-            return ast.ImportFrom(module=new_module, names=node.names, level=node.level)
-        return node
+            node = ast.ImportFrom(module=new_module, names=node.names, level=node.level)
+        return super().visit_ImportFrom(node)
 
     def visit_Import(self, node: ast.Import) -> ast.Import:
         """Rewrite 'import X' statements."""
@@ -79,13 +71,13 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
 
         if new_names:
             self.dirty = True
-            return ast.Import(names=new_names)
-        return node
+            node = ast.Import(names=new_names)
+        return super().visit_Import(node)
 
     def visit_Attribute(self, node: ast.AST) -> ast.AST:
         """Rewrite module references like 'urllib.response' to 'urllib_punycode.response'."""
         # First visit any child nodes
-        node = self.generic_visit(node)
+        # node = self.generic_visit(node)
 
         # Check if this is a reference to the original module
         if (
@@ -95,11 +87,12 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
         ):
             # Replace the module name with the mount point
             self.dirty = True
-            return ast.Attribute(
+            node = ast.Attribute(
                 value=ast.Name(id=self.replace, ctx=node.value.ctx),
                 attr=node.attr,
                 ctx=node.ctx,
             )
+            return super().visit_Attribute(node)
 
         # Check for nested attributes like urllib.parse.urlparse
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute):
@@ -119,9 +112,21 @@ class ModuleReferenceRewriter(ast.NodeTransformer):
                     result = ast.Attribute(value=result, attr=attr, ctx=ctx)
 
                 self.dirty = True
-                return result
 
-        return node
+        return super().visit_Attribute(node)
+
+
+def reference_rewrite_factory(
+    search: str, replace: str
+) -> type[_ModuleReferenceRewriter]:
+    """Get an AST module reference rewriter and unparser."""
+
+    class ReferenceRewriter(_ModuleReferenceRewriter): ...
+
+    ReferenceRewriter.search = search
+    ReferenceRewriter.replace = replace
+
+    return ReferenceRewriter
 
 
 def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
@@ -217,12 +222,11 @@ class ModShimLoader(Loader):
         tree = ast.parse(code)
 
         # Use the new transformer that handles both imports and module references
-        transformer = ModuleReferenceRewriter(search, replace)
-        transformed_tree: ast.AST = transformer.visit(tree)
+        transformer = reference_rewrite_factory(search, replace)()
+        new_code = transformer.visit(tree)
         if not transformer.dirty:
             return code, False
-        _ = ast.fix_missing_locations(transformed_tree)
-        return ast.unparse(transformed_tree), True
+        return new_code, True
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by combining upper and lower modules."""
