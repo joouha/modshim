@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import ast
 import logging
+import marshal
 import os
+import os.path
 import sys
 import threading
-from importlib import import_module
+from importlib import _bootstrap_external, import_module
 from importlib.abc import InspectLoader, Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
-from importlib.util import find_spec, module_from_spec
+from importlib.util import cache_from_source, find_spec, module_from_spec
 from types import ModuleType
 from typing import TYPE_CHECKING, ClassVar
 
@@ -154,6 +156,74 @@ class ModShimLoader(Loader):
 
     # Track module that have already been created
     cache: ClassVar[dict[tuple[str, str], ModuleType]] = {}
+    # Store magic number at class level
+    _magic_number = _bootstrap_external._RAW_MAGIC_NUMBER.to_bytes(4, "little")
+
+    def _get_cached_code(
+        self, source_path: str, source: str, mount_root: str
+    ) -> code | None:
+        """Get cached compiled code if it exists and is valid."""
+        if not source_path or source_path.startswith("<"):
+            return None
+
+        # Create cache filename that includes the mount point to avoid conflicts
+        cache_path = cache_from_source(source_path)
+        if mount_root:
+            cache_dir = os.path.dirname(cache_path)
+            cache_name = os.path.basename(cache_path)
+            cache_path = os.path.join(cache_dir, f"{mount_root}.{cache_name}")
+
+        try:
+            # Check if cache exists and is newer than source
+            source_mtime = os.path.getmtime(source_path)
+            cache_mtime = os.path.getmtime(cache_path)
+            if cache_mtime <= source_mtime:
+                return None
+
+            # Read and validate cache
+            with open(cache_path, "rb") as f:
+                # Read magic number and timestamp
+                magic = f.read(4)
+                if magic != self._magic_number:
+                    return None
+
+                # Skip timestamp and size fields
+                f.seek(12)
+
+                # Load code object
+                return marshal.load(f)
+
+        except (OSError, EOFError, ValueError):
+            return None
+
+    def _cache_code(self, code_obj: code, source_path: str, mount_root: str) -> None:
+        """Cache compiled code to disk."""
+        if not source_path or source_path.startswith("<"):
+            return
+
+        # Create cache filename that includes the mount point
+        cache_path = cache_from_source(source_path)
+        if mount_root:
+            cache_dir = os.path.dirname(cache_path)
+            cache_name = os.path.basename(cache_path)
+            cache_path = os.path.join(cache_dir, f"{mount_root}.{cache_name}")
+
+        # Ensure cache directory exists
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+
+        # Write cache file
+        try:
+            with open(cache_path, "wb") as f:
+                # Write magic number and placeholder timestamp/size
+                f.write(self._magic_number)
+                f.write(b"\0" * 8)  # timestamp and size
+
+                # Write code object
+                marshal.dump(code_obj, f)
+        except OSError:
+            # Ignore cache write failures
+            pass
+
     # Track modules that are currently being processed to detect circular shimming
     _processing: ClassVar[set[ModuleType]] = set()
 
@@ -243,32 +313,40 @@ class ModShimLoader(Loader):
         upper_name = module.__name__.replace(self.mount_root, self.upper_root)
 
         if lower_spec := self.lower_spec:
-            # First try to get the source code
-            lower_source = get_module_source(lower_name, lower_spec)
+            # Try to get cached code first
+            code_obj = None
+            if lower_spec.origin:
+                code_obj = self._get_cached_code(lower_spec.origin, "", self.mount_root)
 
-            if lower_source is not None:
-                lower_source, _ = self.rewrite_module_code(
-                    lower_source, self.lower_root, self.mount_root
-                )
+            if code_obj is None:
+                # Cache miss - get and rewrite the source
+                lower_source = get_module_source(lower_name, lower_spec)
 
-                lower_filename = f"{module.__file__}::{lower_spec.origin}"
-                # Execute the code with the filename that matches the line cache entry
-                try:
-                    log.debug("Executing lower: %r", self.lower_spec.name)
-                    exec(  # noqa: S102
-                        compile(lower_source, lower_filename, "exec"), module.__dict__
+                if lower_source is not None:
+                    lower_source, _ = self.rewrite_module_code(
+                        lower_source, self.lower_root, self.mount_root
                     )
-                except:
-                    import linecache
 
-                    # Add the source to the line cache on error for better error reporting
-                    linecache.cache[lower_filename] = (
-                        len(lower_source),
-                        None,
-                        lower_source.splitlines(True),
-                        lower_filename,
-                    )
-                    raise
+                    lower_filename = f"{module.__file__}::{lower_spec.origin}"
+                    code_obj = compile(lower_source, lower_filename, "exec")
+
+                    if lower_spec.origin:
+                        self._cache_code(code_obj, lower_spec.origin, self.mount_root)
+
+            if code_obj is not None:
+                # try:
+                log.debug("Executing lower: %r", self.lower_spec.name)
+                exec(code_obj, module.__dict__)  # noqa: S102
+                # except:
+                #     import linecache
+                #     # Add the source to the line cache on error for better error reporting
+                #     linecache.cache[lower_filename] = (
+                #         len(lower_source),
+                #         None,
+                #         lower_source.splitlines(True),
+                #         lower_filename,
+                #     )
+                #     raise
 
             # If all else fails, execute the lower module natively then copy its attributes
             elif lower_spec.loader:
@@ -287,51 +365,60 @@ class ModShimLoader(Loader):
 
         # Load and execute upper module
         if upper_spec := self.upper_spec:
-            # First try to get the source code
-            upper_source = get_module_source(upper_name, upper_spec)
+            # Try to get cached code first
+            code_obj = None
+            if upper_spec.origin:
+                code_obj = self._get_cached_code(upper_spec.origin, "", self.mount_root)
 
-            if upper_source:
-                # Parse upper code
-                # Rewrite imports of lower to mount
-                upper_source, _ = self.rewrite_module_code(
-                    upper_source, self.lower_root, self.mount_root
-                )
+            # Generate name of working module
+            parts = module.__name__.split(".")
+            working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
 
-                # Generate name of working module
-                parts = module.__name__.split(".")
-                working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
+            # If the current module is imported, then create the working module
+            # if modified:
+            # If the upper imports from the upper, we create a working copy of the
+            # current module to avoid circular import errors
+            # upper_source = working_source
 
-                # Rewrite import of the current module to the working module to prevent
-                # recursion errors
-                working_source, modified = self.rewrite_module_code(
-                    upper_source, module.__name__, working_name
-                )
-                # If the current module is imported, then create the working module
-                if modified:
-                    # If the upper imports from the upper, we create a working copy of the
-                    # current module to avoid circular import errors
-                    upper_source = working_source
+            # Create a working copy of the module's state after executing the lower module
+            working_module = ModuleType(working_name)
+            working_module.__name__ = working_name
+            working_module.__file__ = getattr(module, "__file__", None)
+            working_module.__package__ = getattr(module, "__package__", None)
 
-                    # Create a working copy of the module's state after executing the lower module
-                    working_module = ModuleType(working_name)
-                    working_module.__name__ = working_name
-                    working_module.__file__ = getattr(module, "__file__", None)
-                    working_module.__package__ = getattr(module, "__package__", None)
+            # Copy module state to working module
+            working_module.__dict__.update(module.__dict__)
 
-                    # Copy module state to working module
-                    working_module.__dict__.update(module.__dict__)
+            # Register the modules in sys.modules
+            sys.modules[working_name] = working_module
 
-                    # Register the modules in sys.modules
-                    sys.modules[working_name] = working_module
+            if code_obj is None:
+                # Cache miss - get and rewrite the source
+                upper_source = get_module_source(upper_name, upper_spec)
 
-                # Execute the code with the filename that matches the line cache entry
-                upper_filename = f"{module.__file__}::{upper_spec.origin}"
+                if upper_source:
+                    # Parse upper code
+                    # Rewrite imports of lower to mount
+                    upper_source, _ = self.rewrite_module_code(
+                        upper_source, self.lower_root, self.mount_root
+                    )
+
+                    # Rewrite import of the current module to the working module to prevent
+                    # recursion errors
+                    upper_source, modified = self.rewrite_module_code(
+                        upper_source, module.__name__, working_name
+                    )
+                    # Execute the code with the filename that matches the line cache entry
+                    upper_filename = f"{module.__file__}::{upper_spec.origin}"
+                    code_obj = compile(upper_source, upper_filename, "exec")
+
+                    if upper_spec.origin:
+                        self._cache_code(code_obj, upper_spec.origin, self.mount_root)
+
+            if code_obj is not None:
                 try:
                     log.debug("Executing upper: %r", self.upper_spec.name)
-                    exec(  # noqa: S102
-                        compile(upper_source, upper_filename, "exec"),
-                        module.__dict__,
-                    )
+                    exec(code_obj, module.__dict__)  # noqa: S102
                 except:
                     import linecache
 
@@ -343,6 +430,7 @@ class ModShimLoader(Loader):
                         upper_filename,
                     )
                     raise
+
             elif upper_spec.loader and isinstance(upper_spec.loader, InspectLoader):
                 # Fall back to compiled code if source is not available
                 try:
