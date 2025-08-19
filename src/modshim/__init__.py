@@ -235,57 +235,59 @@ class ModShimLoader(Loader):
             return code, False
         return new_code, True
 
-    def _get_cached_code(
-        self, source_path: str, source: str, mount_root: str
-    ) -> code | None:
+    def _get_cached_code(self, spec: ModuleSpec) -> Code | None:
         """Get cached compiled code if it exists and is valid."""
-        if not source_path or source_path.startswith("<"):
+        print(self.mount_root)
+        print(spec, spec.origin)
+        origin = spec.origin
+        if not origin or origin.startswith("<"):
             return None
+
+        source_path = Path(origin)
 
         # Create cache filename that includes the mount point to avoid conflicts
-        cache_path = cache_from_source(source_path)
-        if mount_root:
-            cache_dir = os.path.dirname(cache_path)
-            cache_name = os.path.basename(cache_path)
-            cache_path = os.path.join(cache_dir, f"{mount_root}.{cache_name}")
+        cache_path = Path(cache_from_source(source_path))
+        cache_dir = cache_path.parent
+        cache_name = cache_path.name
+        cache_path = cache_dir / f"{self.mount_root}.{cache_name}"
 
-        try:
-            # Check if cache exists and is newer than source
-            source_mtime = os.path.getmtime(source_path)
-            cache_mtime = os.path.getmtime(cache_path)
-            if cache_mtime <= source_mtime:
-                return None
-
-            # Read and validate cache
-            with open(cache_path, "rb") as f:
-                # Read magic number and timestamp
-                magic = f.read(4)
-                if magic != self._magic_number:
-                    return None
-
-                # Skip timestamp and size fields
-                f.seek(12)
-
-                # Load code object
-                return marshal.load(f)
-
-        except (OSError, EOFError, ValueError):
+        if not cache_path.exists():
             return None
 
-    def _cache_code(self, code_obj: code, source_path: str, mount_root: str) -> None:
+        # Check if cache exists and is newer than source
+        source_mtime = source_path.stat().st_mtime
+        cache_mtime = cache_path.stat().st_mtime
+        if cache_mtime <= source_mtime:
+            return None
+
+        # Read and validate cache
+        with cache_path.open("rb") as f:
+            # Read magic number and timestamp
+            magic = f.read(4)
+            if magic != self._magic_number:
+                return None
+
+            # Skip timestamp and size fields
+            f.seek(12)
+
+            # Load code object
+            return marshal.load(f)
+
+    def _cache_code(self, spec: ModuleSpec, code_obj: Code) -> None:
         """Cache compiled code to disk."""
-        if not source_path or source_path.startswith("<"):
-            return
+        origin = spec.origin
+        if not origin or origin.startswith("<"):
+            return None
+
+        source_path = Path(origin)
 
         # Create cache filename that includes the mount point
-        cache_path = cache_from_source(source_path)
-        if mount_root:
-            cache_dir = os.path.dirname(cache_path)
-            cache_name = os.path.basename(cache_path)
-            cache_path = os.path.join(cache_dir, f"{mount_root}.{cache_name}")
-
+        cache_path = Path(cache_from_source(source_path))
+        cache_dir = cache_path.parent
         # Ensure cache directory exists
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        cache_dir.mkdir(exist_ok=True, parents=True)
+        cache_name = cache_path.name
+        cache_path = cache_dir / f"{self.mount_root}.{cache_name}"
 
         # Write cache file
         try:
@@ -339,7 +341,7 @@ class ModShimLoader(Loader):
             # Try to get cached code first
             code_obj = None
             if lower_spec.origin:
-                code_obj = self._get_cached_code(lower_spec.origin, "", self.mount_root)
+                code_obj = self._get_cached_code(lower_spec)
 
             def _get_lower_source() -> str | None:
                 if source := get_module_source(lower_name, lower_spec):
@@ -357,7 +359,7 @@ class ModShimLoader(Loader):
 
                     # self.cache_code(code_obj, lower_source, lower_spec)
                     if lower_spec.origin:
-                        self._cache_code(code_obj, lower_spec.origin, self.mount_root)
+                        self._cache_code(lower_spec, code_obj)
 
             if code_obj is not None:
                 try:
@@ -414,7 +416,7 @@ class ModShimLoader(Loader):
             # Try to get cached code first
             code_obj = None
             if upper_spec.origin:
-                code_obj = self._get_cached_code(upper_spec.origin, "", self.mount_root)
+                code_obj = self._get_cached_code(upper_spec)
 
             def _get_upper_source() -> str | None:
                 if source := get_module_source(upper_name, upper_spec):
@@ -438,7 +440,7 @@ class ModShimLoader(Loader):
                     code_obj = compile(upper_source, upper_filename, "exec")
 
                     if upper_spec.origin:
-                        self._cache_code(code_obj, upper_spec.origin, self.mount_root)
+                        self._cache_code(upper_spec, code_obj)
 
             if code_obj is not None:
                 try:
