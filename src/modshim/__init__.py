@@ -18,7 +18,7 @@ from importlib.machinery import ModuleSpec
 from importlib.util import find_spec, module_from_spec
 from pathlib import Path
 from types import CodeType, ModuleType
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -30,7 +30,7 @@ if os.getenv("MODSHIM_DEBUG"):
     logging.basicConfig(level=logging.DEBUG)
 
 
-class _ModuleReferenceRewriter(ast._Unparser, ast.NodeTransformer):  #  pyright: ignore[reportAttributeAccessIssue]
+class _ModuleReferenceRewriter(ast.NodeTransformer):
     """AST transformer that rewrites module references to point to the mount point."""
 
     search: str
@@ -53,17 +53,20 @@ class _ModuleReferenceRewriter(ast._Unparser, ast.NodeTransformer):  #  pyright:
                 new_module = f"{self.replace}{suffix}"
 
             self.dirty = True
-            node = ast.ImportFrom(module=new_module, names=node.names, level=node.level)
-        return super().visit_ImportFrom(node)
+            return ast.ImportFrom(module=new_module, names=node.names, level=node.level)
+        return node
 
     def visit_Import(self, node: ast.Import) -> ast.Import:
         """Rewrite 'import X' statements."""
         new_names: list[ast.alias] = []
+        made_change = False
         for name in node.names:
             if name.name == self.search:
+                made_change = True
                 # Replace the original module name with the mount point
                 new_names.append(ast.alias(name=self.replace, asname=name.asname))
             elif name.name.startswith(f"{self.search}."):
+                made_change = True
                 # Handle submodule imports
                 suffix = name.name[len(self.search) :]
                 new_name = f"{self.replace}{suffix}"
@@ -71,57 +74,43 @@ class _ModuleReferenceRewriter(ast._Unparser, ast.NodeTransformer):  #  pyright:
             else:
                 new_names.append(name)
 
-        if new_names:
+        if made_change:
             self.dirty = True
-            node = ast.Import(names=new_names)
-        return super().visit_Import(node)
+            return ast.Import(names=new_names)
 
-    def visit_Attribute(self, node: ast.AST) -> ast.AST:
+        return node
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
         """Rewrite module references like 'urllib.response' to 'urllib_punycode.response'."""
-        # First visit any child nodes
-        # node = self.generic_visit(node)
+        node = cast("ast.Attribute", self.generic_visit(node))
 
         # Check if this is a reference to the original module
-        if (
-            isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == self.search
-        ):
+        if isinstance(node.value, ast.Name) and node.value.id == self.search:
             # Replace the module name with the mount point
             self.dirty = True
-            node = ast.Attribute(
-                value=ast.Name(id=self.replace, ctx=node.value.ctx),
+
+            # Create a proper attribute access chain from the replacement string.
+            # This prevents creating an invalid ast.Name with dots in it.
+            parts = self.replace.split(".")
+            # Start with the first part as a Name node
+            new_value: ast.expr = ast.Name(id=parts[0], ctx=node.value.ctx)
+            # Chain the rest as Attribute nodes
+            for part in parts[1:]:
+                new_value = ast.Attribute(value=new_value, attr=part, ctx=ast.Load())
+
+            return ast.Attribute(
+                value=new_value,
                 attr=node.attr,
                 ctx=node.ctx,
             )
-            return super().visit_Attribute(node)
 
-        # Check for nested attributes like urllib.parse.urlparse
-        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute):
-            # Build the full attribute chain to check if it starts with the original module
-            attrs: list[tuple[str, ast.expr_context]] = []
-            current = node
-            while isinstance(current, ast.Attribute):
-                attrs.insert(0, (current.attr, current.ctx))
-                current = current.value
-
-            # If the base is the original module name, rewrite the entire chain
-            if isinstance(current, ast.Name) and current.id == self.search:
-                # Start with the mount point as the base
-                result = ast.Name(id=self.replace, ctx=current.ctx)
-                # Rebuild the attribute chain
-                for attr, ctx in attrs:
-                    result = ast.Attribute(value=result, attr=attr, ctx=ctx)
-
-                self.dirty = True
-
-        return super().visit_Attribute(node)
+        return node
 
 
 def reference_rewrite_factory(
     search: str, replace: str
 ) -> type[_ModuleReferenceRewriter]:
-    """Get an AST module reference rewriter and unparser."""
+    """Get an AST module reference rewriter."""
 
     class ReferenceRewriter(_ModuleReferenceRewriter): ...
 
@@ -265,7 +254,7 @@ class ModShimLoader(Loader):
 
     def rewrite_module_code(
         self, code: str, search: str, replace: str
-    ) -> tuple[str, bool]:
+    ) -> tuple[ast.AST, bool]:
         """Rewrite imports and module references in module code.
 
         Args:
@@ -274,17 +263,17 @@ class ModShimLoader(Loader):
             replace: The root package name to replace with
 
         Returns:
-            Tuple of the rewritten source code and a bool signifying if any
+            Tuple of the rewritten ast.AST and a bool signifying if any
                 modifications have been made
         """
         tree = ast.parse(code)
 
         # Use the new transformer that handles both imports and module references
         transformer = reference_rewrite_factory(search, replace)()
-        new_code = transformer.visit(tree)
+        new_tree = transformer.visit(tree)
         if not transformer.dirty:
-            return code, False
-        return new_code, True
+            return tree, False
+        return new_tree, True
 
     def _get_cached_code(self, spec: ModuleSpec) -> CodeType | None:
         """Get cached compiled code if it exists and is valid."""
@@ -394,28 +383,25 @@ class ModShimLoader(Loader):
 
         if lower_spec := self.lower_spec:
             lower_filename = f"modshim://{module.__file__}::{lower_spec.origin}"
-            lower_source: str | None = None
 
             # Try to get cached code first
             code_obj = None
             if lower_spec.origin:
                 code_obj = self._get_cached_code(lower_spec)
 
-            def _get_lower_source() -> str | None:
-                if source := get_module_source(lower_name, lower_spec):
-                    source, _ = self.rewrite_module_code(
+            if code_obj is None:
+                source = get_module_source(lower_name, lower_spec)
+                if source is not None:
+                    # Rewrite the source to get an AST
+                    tree, was_rewritten = self.rewrite_module_code(
                         source, self.lower_root, self.mount_root
                     )
-                return source
+                    if was_rewritten:
+                        ast.fix_missing_locations(tree)
 
-            if code_obj is None:
-                lower_source = _get_lower_source()
+                    # Compile the AST object directly
+                    code_obj = compile(cast("ast.Module", tree), lower_filename, "exec")
 
-                if lower_source is not None:
-                    # Cache miss - get and rewrite the source
-                    code_obj = compile(lower_source, lower_filename, "exec")
-
-                    # self.cache_code(code_obj, lower_source, lower_spec)
                     if lower_spec.origin:
                         self._cache_code(lower_spec, code_obj)
 
@@ -424,16 +410,19 @@ class ModShimLoader(Loader):
                     log.debug("Executing lower: %r", self.lower_spec.name)
                     exec(code_obj, module.__dict__)  # noqa: S102
                 except:
-                    if lower_source is None:
-                        lower_source = _get_lower_source()
-                    if lower_source is not None:
+                    # On error, generate source for linecache for better tracebacks.
+                    source = get_module_source(lower_name, lower_spec)
+                    if source is not None:
                         import linecache
 
-                        # Add the source to the line cache on error for better error reporting
+                        tree, _ = self.rewrite_module_code(
+                            source, self.lower_root, self.mount_root
+                        )
+                        rewritten_source = ast.unparse(tree)
                         linecache.cache[lower_filename] = (
-                            len(lower_source),
+                            len(rewritten_source),
                             None,
-                            lower_source.splitlines(True),
+                            rewritten_source.splitlines(True),
                             lower_filename,
                         )
                     raise
@@ -469,33 +458,35 @@ class ModShimLoader(Loader):
             sys.modules[working_name] = working_module
 
             upper_filename = f"modshim://{module.__file__}::{upper_spec.origin}"
-            upper_source: str | None = None
 
             # Try to get cached code first
             code_obj = None
             if upper_spec.origin:
                 code_obj = self._get_cached_code(upper_spec)
 
-            def _get_upper_source() -> str | None:
-                if source := get_module_source(upper_name, upper_spec):
-                    # Rewrite imports of lower to mount
-                    source, _ = self.rewrite_module_code(
-                        source, self.lower_root, self.mount_root
-                    )
-                    # Rewrite import of the current module to the working module to prevent
-                    # recursion errors
-                    source, _ = self.rewrite_module_code(
-                        source, module.__name__, working_name
-                    )
-                return source
-
             if code_obj is None:
-                # Cache miss - get and rewrite the source
-                upper_source = _get_upper_source()
+                source = get_module_source(upper_name, upper_spec)
+                if source is not None:
+                    # Perform chained AST transformations
+                    tree = ast.parse(source)
 
-                if upper_source is not None:
-                    # Execute the code with the filename that matches the line cache entry
-                    code_obj = compile(upper_source, upper_filename, "exec")
+                    # First pass: rewrite lower_root -> mount_root
+                    transformer1 = reference_rewrite_factory(
+                        self.lower_root, self.mount_root
+                    )()
+                    tree = transformer1.visit(tree)
+
+                    # Second pass: rewrite current module -> working module
+                    transformer2 = reference_rewrite_factory(
+                        module.__name__, working_name
+                    )()
+                    tree = transformer2.visit(tree)
+
+                    # If any changes were made, fix locations and compile
+                    if transformer1.dirty or transformer2.dirty:
+                        ast.fix_missing_locations(tree)
+
+                    code_obj = compile(cast("ast.Module", tree), upper_filename, "exec")
 
                     if upper_spec.origin:
                         self._cache_code(upper_spec, code_obj)
@@ -505,16 +496,27 @@ class ModShimLoader(Loader):
                     log.debug("Executing upper: %r", self.upper_spec.name)
                     exec(code_obj, module.__dict__)  # noqa: S102
                 except:
-                    if upper_source is None:
-                        upper_source = _get_upper_source()
-                    if upper_source is not None:
+                    # On error, generate source for linecache
+                    source = get_module_source(upper_name, upper_spec)
+                    if source is not None:
                         import linecache
 
-                        # Add the source to the line cache on error for better error reporting
+                        # Chain transformations to get the final AST, then unparse
+                        tree = ast.parse(source)
+                        transformer1 = reference_rewrite_factory(
+                            self.lower_root, self.mount_root
+                        )()
+                        tree = transformer1.visit(tree)
+                        transformer2 = reference_rewrite_factory(
+                            module.__name__, working_name
+                        )()
+                        tree = transformer2.visit(tree)
+
+                        rewritten_source = ast.unparse(tree)
                         linecache.cache[upper_filename] = (
-                            len(upper_source),
+                            len(rewritten_source),
                             None,
-                            upper_source.splitlines(True),
+                            rewritten_source.splitlines(True),
                             upper_filename,
                         )
                     raise
