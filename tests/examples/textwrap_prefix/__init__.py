@@ -1,12 +1,13 @@
 """Enhanced textwrap module that adds a prefix to wrapped lines."""
 
 from textwrap import TextWrapper as OriginalTextWrapper
+from typing import Any
 
 
 class TextWrapper(OriginalTextWrapper):
     """Enhanced TextWrapper that adds a prefix to each line."""
 
-    def __init__(self, *args, prefix: str = "", **kwargs) -> None:
+    def __init__(self, *args: Any, prefix: str = "", **kwargs: Any) -> None:
         """Initialize TextWrapper with an optional prefix."""
         self.prefix = prefix
         if prefix:

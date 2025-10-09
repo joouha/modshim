@@ -80,7 +80,7 @@ def test_textwrap_prefix_override() -> None:
     ]
     # Original wrap doesn't accept 'prefix'
     with pytest.raises(TypeError):
-        textwrap.wrap(text, width=20, prefix="> ")
+        textwrap.wrap(text, width=20, prefix="> ")  # type: ignore [reportCallIssue]
 
 
 def test_random_fixed_seed() -> None:
@@ -244,9 +244,11 @@ def test_filecmp_ignores_override() -> None:
     import tempfile
     from pathlib import Path
 
+    from filecmp_ignores import (  # type: ignore [reportCallIssue]
+        DEFAULT_IGNORES as SHIM_DEFAULT_IGNORES,
+    )
     from filecmp_ignores import (  # type: ignore [reportMissingImports]
         dircmp,
-        DEFAULT_IGNORES as SHIM_DEFAULT_IGNORES,
     )
 
     # Check our new default ignores list
@@ -499,9 +501,11 @@ def test_filecmp_ignores_override_overmount() -> None:
     import tempfile
     from pathlib import Path
 
-    from tests.examples.filecmp_ignores import (  # type: ignore [reportMissingImports]
-        dircmp,
+    from tests.examples.filecmp_ignores import (
         DEFAULT_IGNORES as SHIM_DEFAULT_IGNORES,
+    )
+    from tests.examples.filecmp_ignores import (
+        dircmp,  # type: ignore [reportMissingImports]
     )
 
     assert ".new_ignore" in SHIM_DEFAULT_IGNORES
