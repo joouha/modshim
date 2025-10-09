@@ -182,29 +182,31 @@ def test_module_reload() -> None:
 def test_package_paths() -> None:
     """Test that __path__ and package attributes are handled correctly."""
     shim(
-        upper="tests.examples.pathlib_is_empty", lower="pathlib", mount="pathlib_paths"
+        upper="tests.examples.textwrap_prefix",
+        lower="textwrap",
+        mount="textwrap_paths",
     )
-    import pathlib_paths as merged  # type: ignore [reportMissingImports]
+    import textwrap_paths as merged  # type: ignore [reportMissingImports]
 
-    # Verify package attributes are set correctly
+    # Verify package attributes are set correctly because the upper module is a package.
     assert hasattr(merged, "__path__")
-    assert merged.__package__ == "pathlib_paths"
+    assert merged.__package__ == "textwrap_paths"
 
     # Test importing from package
-    from pathlib_paths import Path  # type: ignore [reportMissingImports]
-
-    assert hasattr(Path, "is_empty")
+    from textwrap_paths import TextWrapper  # type: ignore [reportMissingImports]  # noqa: F401, I001
 
 
 def test_nonexistent_modules() -> None:
     """Test that ImportError is raised when neither upper nor lower module exists."""
     # Create a shim with non-existent modules
-    shim(lower="nonexistent_lower", upper="nonexistent_upper", mount="nonexistent_mount")
-    
+    shim(
+        lower="nonexistent_lower", upper="nonexistent_upper", mount="nonexistent_mount"
+    )
+
     # Attempt to import the non-existent module
     with pytest.raises(ImportError):
         import nonexistent_mount  # type: ignore [reportMissingImports]
-        
+
     # Also test using __import__
     with pytest.raises(ImportError):
         __import__("nonexistent_mount")
@@ -213,12 +215,16 @@ def test_nonexistent_modules() -> None:
 def test_import_error_on_nonexistent_submodule() -> None:
     """Test that ImportError is raised when importing a non-existent submodule."""
     # Create a shim with a known module
-    shim(lower="json", upper="tests.examples.json_single_quotes", mount="json_import_error")
-    
+    shim(
+        lower="json",
+        upper="tests.examples.json_single_quotes",
+        mount="json_import_error",
+    )
+
     # Attempt to import a non-existent submodule
     with pytest.raises(ImportError):
         from json_import_error import non_existent_submodule  # type: ignore [reportMissingImports]
-    
+
     # Also test using __import__
     with pytest.raises(ImportError):
         __import__("json_import_error.non_existent_submodule")

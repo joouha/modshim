@@ -79,6 +79,42 @@ def test_datetime_custom_override() -> None:
     assert not hasattr(datetime.now(), "is_weekend")
 
 
+def test_textwrap_prefix_override() -> None:
+    """Test that textwrap can be enhanced to prefix lines."""
+    shim(
+        lower="textwrap",
+        upper="tests.examples.textwrap_prefix",
+        mount="textwrap_prefix",
+    )
+    import textwrap
+
+    import textwrap_prefix as textwrap_test  # type: ignore [reportMissingImports]
+
+    text = "This is a long line of text that will be wrapped."
+
+    # Test our shimed version
+    wrapped = textwrap_test.wrap(text, width=20, prefix="> ")
+    assert wrapped == [
+        "> This is a long",
+        "> line of text that",
+        "> will be wrapped.",
+    ]
+
+    filled = textwrap_test.fill(text, width=20, prefix="> ")
+    assert filled == ("> This is a long\n> line of text that\n> will be wrapped.")
+
+    # Test that original is unaffected
+    original_wrapped = textwrap.wrap(text, width=20)
+    assert original_wrapped == [
+        "This is a long line",
+        "of text that will be",
+        "wrapped.",
+    ]
+    # Original wrap doesn't accept 'prefix'
+    with pytest.raises(TypeError):
+        textwrap.wrap(text, width=20, prefix="> ")
+
+
 def test_random_fixed_seed() -> None:
     """Test that random module can be configured with a fixed seed."""
     shim(lower="random", upper="tests.examples.random_fixed", mount="random_fixed")
