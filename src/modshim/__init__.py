@@ -7,17 +7,16 @@ that includes functionality from both. Internal imports are redirected to the mo
 from __future__ import annotations
 
 import ast
-import hashlib
 import logging
 import marshal
 import os
 import os.path
 import sys
 import threading
-from importlib import _bootstrap_external, import_module
+from importlib import import_module
 from importlib.abc import InspectLoader, Loader, MetaPathFinder
-from importlib.machinery import ModuleSpec, SourceFileLoader
-from importlib.util import cache_from_source, find_spec, module_from_spec
+from importlib.machinery import ModuleSpec
+from importlib.util import find_spec, module_from_spec
 from pathlib import Path
 from types import CodeType, ModuleType
 from typing import TYPE_CHECKING, ClassVar
@@ -153,13 +152,54 @@ def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
         return None
 
 
+def get_cache_path(
+    upper_file_path: str,
+    mount_root: str,
+    original_module_name: str,
+    *,
+    optimization: str | int | None = None,
+) -> Path:
+    """Given the path to a .py file, return the path to its .pyc file.
+
+    The .py file does not need to exist; this simply returns the path to the
+    .pyc file calculated as if the .py file were imported. All files are
+    cached in the upper files' __modshim__ directory.
+
+    The 'optimization' parameter controls the presumed optimization level of
+    the bytecode file. If 'optimization' is not None, the string representation
+    of the argument is taken and verified to be alphanumeric (else ValueError
+    is raised).
+
+    If sys.implementation.cache_tag is None then NotImplementedError is raised.
+    """
+    upper_path = Path(upper_file_path)
+    cache_dir = upper_path.parent / "__modshim__"
+
+    tag = sys.implementation.cache_tag
+    if tag is None:
+        raise NotImplementedError("sys.implementation.cache_tag is None")
+
+    base_filename = f"{mount_root}.{original_module_name}"
+    stem = f"{base_filename}.{tag}"
+
+    if optimization is None and (
+        optimization := str(sys.flags.optimize if sys.flags.optimize != 0 else "")
+    ):
+        if not optimization.isalnum():
+            raise ValueError(f"{optimization!r} is not alphanumeric")
+        stem = f"{stem}._OPT{optimization}"
+
+    filename = cache_dir / f"{stem}.pyc"
+    return filename
+
+
 class ModShimLoader(Loader):
     """Loader for shimmed modules."""
 
     # Track module that have already been created
     cache: ClassVar[dict[tuple[str, str], ModuleType]] = {}
     # Store magic number at class level
-    _magic_number = _bootstrap_external._RAW_MAGIC_NUMBER.to_bytes(4, "little")
+    _magic_number = (1234).to_bytes(2, "little") + b"\r\n"
 
     # Track modules that are currently being processed to detect circular shimming
     _processing: ClassVar[set[ModuleType]] = set()
@@ -189,6 +229,18 @@ class ModShimLoader(Loader):
         self.upper_root: str = upper_root
         self.mount_root: str = mount_root
         self.finder: ModShimFinder = finder
+
+        # Set flag indicating we are performing an internal lookup
+        finder._internal_call.active = True
+        try:
+            try:
+                upper_root_spec = find_spec(upper_root)
+            except (ImportError, AttributeError):
+                upper_root_spec = None
+            self.upper_root_origin = upper_root_spec.origin if upper_root_spec else None
+        finally:
+            # Unset the internal call flag
+            finder._internal_call.active = False
 
     def create_module(self, spec: ModuleSpec) -> ModuleType:
         """Create a new module object."""
@@ -235,29 +287,31 @@ class ModShimLoader(Loader):
             return code, False
         return new_code, True
 
-    def _get_cached_code(self, spec: ModuleSpec) -> Code | None:
+    def _get_cached_code(self, spec: ModuleSpec) -> CodeType | None:
         """Get cached compiled code if it exists and is valid."""
-        print(self.mount_root)
-        print(spec, spec.origin)
         origin = spec.origin
-        if not origin or origin.startswith("<"):
+        upper_origin = self.upper_root_origin
+        if not origin or origin.startswith("<") or not upper_origin:
             return None
 
         source_path = Path(origin)
 
         # Create cache filename that includes the mount point to avoid conflicts
-        cache_path = Path(cache_from_source(source_path))
-        cache_dir = cache_path.parent
-        cache_name = cache_path.name
-        cache_path = cache_dir / f"{self.mount_root}.{cache_name}"
-
+        cache_path = get_cache_path(
+            upper_file_path=upper_origin,
+            mount_root=self.mount_root,
+            original_module_name=spec.name,
+        )
         if not cache_path.exists():
             return None
 
+        try:
+            source_stat = source_path.stat()
+        except OSError:
+            return None
+
         # Check if cache exists and is newer than source
-        source_mtime = source_path.stat().st_mtime
-        cache_mtime = cache_path.stat().st_mtime
-        if cache_mtime <= source_mtime:
+        if cache_path.stat().st_mtime <= source_stat.st_mtime:
             return None
 
         # Read and validate cache
@@ -267,58 +321,63 @@ class ModShimLoader(Loader):
             if magic != self._magic_number:
                 return None
 
-            # Skip timestamp and size fields
-            f.seek(12)
+            cached_mtime_bytes = f.read(4)
+            cached_size_bytes = f.read(4)
+            if len(cached_mtime_bytes) != 4 or len(cached_size_bytes) != 4:
+                return None
+
+            source_mtime = int(source_stat.st_mtime)
+            source_size = source_stat.st_size
+            if int.from_bytes(cached_mtime_bytes, "little") != (
+                source_mtime & 0xFFFFFFFF
+            ) or int.from_bytes(cached_size_bytes, "little") != (
+                source_size & 0xFFFFFFFF
+            ):
+                return None
 
             # Load code object
-            return marshal.load(f)
+            return marshal.load(f)  # noqa: S302
 
-    def _cache_code(self, spec: ModuleSpec, code_obj: Code) -> None:
+    def _cache_code(self, spec: ModuleSpec, code_obj: CodeType) -> None:
         """Cache compiled code to disk."""
         origin = spec.origin
-        if not origin or origin.startswith("<"):
+        upper_origin = self.upper_root_origin
+
+        if not origin or origin.startswith("<") or not upper_origin:
             return None
 
-        source_path = Path(origin)
+        try:
+            source_path = Path(origin)
+            source_stat = source_path.stat()
+        except OSError:
+            # Cannot get source stats, so cannot cache.
+            return
 
-        # Create cache filename that includes the mount point
-        cache_path = Path(cache_from_source(source_path))
-        cache_dir = cache_path.parent
+        source_mtime = int(source_stat.st_mtime)
+        source_size = source_stat.st_size
+
+        # Get cache path
+        cache_path = get_cache_path(
+            upper_file_path=upper_origin,
+            mount_root=self.mount_root,
+            original_module_name=spec.name,
+        )
         # Ensure cache directory exists
-        cache_dir.mkdir(exist_ok=True, parents=True)
-        cache_name = cache_path.name
-        cache_path = cache_dir / f"{self.mount_root}.{cache_name}"
+        cache_path.parent.mkdir(exist_ok=True, parents=True)
 
         # Write cache file
         try:
-            with open(cache_path, "wb") as f:
-                # Write magic number and placeholder timestamp/size
+            with cache_path.open("wb") as f:
+                # Write magic number and timestamp/size
                 f.write(self._magic_number)
-                f.write(b"\0" * 8)  # timestamp and size
+                f.write((source_mtime & 0xFFFFFFFF).to_bytes(4, "little"))
+                f.write((source_size & 0xFFFFFFFF).to_bytes(4, "little"))
 
                 # Write code object
                 marshal.dump(code_obj, f)
         except OSError:
             # Ignore cache write failures
             pass
-
-    """
-    def cache_code(self, code_obj: CodeType, source: str, spec: ModuleSpec) -> None:
-        if spec.origin and isinstance(spec.loader, SourceFileLoader):
-            bytecode_path = Path(cache_from_source(spec.origin))
-            parts = bytecode_path.name.split(".")
-            hash = hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()[:16]
-            bytecode_path = str(
-                bytecode_path.parent
-                / f"{parts[0]}.__modshim__.{hash}.{'.'.join(parts[1:])}"
-            )
-            st = spec.loader.path_stats(spec.origin)
-            source_mtime = int(st["mtime"])
-            data = _bootstrap_external._code_to_timestamp_pyc(
-                code_obj, source_mtime, len(source)
-            )
-            spec.loader._cache_bytecode(spec.origin, bytecode_path, data)
-    """
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by combining upper and lower modules."""
@@ -573,7 +632,7 @@ class ModShimFinder(MetaPathFinder):
         spec = ModuleSpec(
             name=fullname,
             loader=loader,
-            origin=None,
+            origin=upper_spec.origin if upper_spec else None,
             is_package=lower_spec.submodule_search_locations is not None
             if lower_spec
             else False,
