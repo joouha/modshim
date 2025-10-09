@@ -71,7 +71,7 @@ def test_datetime_custom_override() -> None:
     assert datetime_custom.now().is_weekend is True
 
     # Test MAXDATE modification
-    with pytest.raises(ValueError, match="year must be in 1..3000"):
+    with pytest.raises(ValueError, match=r"year must be in 1\.\.3000"):
         datetime_custom(9999, 1, 1)
 
     # Original datetime should be unaffected
@@ -340,7 +340,7 @@ def test_datetime_custom_override_overmount() -> None:
     assert datetime_custom.now().is_weekend is True
 
     # Test MAXDATE modification
-    with pytest.raises(ValueError, match="year must be in 1..3000"):
+    with pytest.raises(ValueError, match=r"year must be in 1\.\.3000"):
         _ = datetime_custom(9999, 1, 1)
 
     # Original datetime should be unaffected
