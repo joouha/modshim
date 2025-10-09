@@ -10,7 +10,6 @@ import ast
 import logging
 import marshal
 import os
-import os.path
 import sys
 import threading
 from importlib import import_module
