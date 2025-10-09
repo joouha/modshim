@@ -1,0 +1,5 @@
+"""Override for filecmp.DEFAULT_IGNORES."""
+
+from filecmp import DEFAULT_IGNORES as ORIGINAL_DEFAULT_IGNORES
+
+DEFAULT_IGNORES = [*ORIGINAL_DEFAULT_IGNORES, ".new_ignore"]

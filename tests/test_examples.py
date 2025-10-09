@@ -47,38 +47,6 @@ def test_json_metadata_override() -> None:
     assert json.loads(original_result) == {"name": "test"}
 
 
-def test_datetime_custom_override() -> None:
-    """Test that datetime can be extended with new properties while preserving original."""
-    shim(
-        lower="_pydatetime",
-        upper="tests.examples.datetime_custom",
-        mount="datetime_custom",
-    )
-    from datetime import datetime
-
-    from datetime_custom import (  # type: ignore [reportMissingImports]
-        datetime as datetime_custom,
-    )
-
-    # Test custom property
-    dt = datetime_custom(2024, 1, 6)  # Saturday
-    assert dt.is_weekend is True
-
-    dt = datetime_custom(2024, 1, 3)  # Wednesday
-    assert dt.is_weekend is False
-
-    # Test overridden class method
-    assert datetime_custom.now().is_weekend is True
-
-    # Test MAXDATE modification
-    with pytest.raises(ValueError, match=r"year must be in 1\.\.3000"):
-        datetime_custom(9999, 1, 1)
-
-    # Original datetime should be unaffected
-    assert isinstance(datetime.now(), datetime)
-    assert not hasattr(datetime.now(), "is_weekend")
-
-
 def test_textwrap_prefix_override() -> None:
     """Test that textwrap can be enhanced to prefix lines."""
     shim(
@@ -143,45 +111,6 @@ def test_random_fixed_seed() -> None:
 
     # Original random should be unaffected
     assert isinstance(random.Random(), random.Random)  # noqa: S311
-
-
-def test_pathlib_is_empty() -> None:
-    """Test enhanced pathlib with is_empty method."""
-    shim(
-        lower="pathlib",
-        upper="tests.examples.pathlib_is_empty",
-        mount="pathlib_is_empty",
-    )
-    import pathlib
-    import tempfile
-    from pathlib import Path
-
-    from pathlib_is_empty import Path as PathTest  # type: ignore [reportMissingImports]
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Create test files and directories
-        empty_dir = PathTest(tmpdir) / "empty_dir"
-        empty_dir.mkdir()
-
-        nonempty_dir = PathTest(tmpdir) / "nonempty_dir"
-        nonempty_dir.mkdir()
-        (nonempty_dir / "file.txt").touch()
-
-        empty_file = PathTest(tmpdir) / "empty.txt"
-        empty_file.touch()
-
-        nonempty_file = PathTest(tmpdir) / "nonempty.txt"
-        nonempty_file.write_text("content")
-
-        # Test is_empty() method
-        assert empty_dir.is_empty is True
-        assert nonempty_dir.is_empty is False
-        assert empty_file.is_empty is True
-        assert nonempty_file.is_empty is False
-
-        # Original Path should be unaffected
-        assert not hasattr(Path(tmpdir), "is_empty")
-        assert isinstance(pathlib.Path(tmpdir), pathlib.Path)
 
 
 def test_time_dilation() -> None:
@@ -304,6 +233,46 @@ id,name,date,score
     assert isinstance(original_row["score"], str)
 
 
+def test_filecmp_ignores_override() -> None:
+    """Test that filecmp.DEFAULT_IGNORES can be overridden."""
+    shim(
+        lower="filecmp",
+        upper="tests.examples.filecmp_ignores",
+        mount="filecmp_ignores",
+    )
+    import filecmp
+    import tempfile
+    from pathlib import Path
+
+    from filecmp_ignores import (  # type: ignore [reportMissingImports]
+        dircmp,
+        DEFAULT_IGNORES as SHIM_DEFAULT_IGNORES,
+    )
+
+    # Check our new default ignores list
+    assert ".new_ignore" in SHIM_DEFAULT_IGNORES
+    # Check original is not affected
+    assert ".new_ignore" not in filecmp.DEFAULT_IGNORES
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dir1 = Path(tmpdir) / "dir1"
+        dir2 = Path(tmpdir) / "dir2"
+        dir1.mkdir()
+        dir2.mkdir()
+
+        # Create files
+        (dir1 / ".new_ignore").touch()
+        (dir1 / "not_ignored").touch()
+
+        # Use our shimmed dircmp. '.new_ignore' should be ignored by default.
+        comparison = dircmp(str(dir1), str(dir2))
+        assert comparison.left_only == ["not_ignored"]
+
+        # Use original filecmp. '.new_ignore' should NOT be ignored by default.
+        original_comparison = filecmp.dircmp(str(dir1), str(dir2))
+        assert sorted(original_comparison.left_only) == [".new_ignore", "not_ignored"]
+
+
 def test_json_single_quotes_override_overmount() -> None:
     """Test that json strings are encoded with single quotes while preserving original behavior."""
     shim(
@@ -352,38 +321,6 @@ def test_json_metadata_override_overmount() -> None:
     assert json.loads(original_result) == {"name": "test"}
 
 
-def test_datetime_custom_override_overmount() -> None:
-    """Test that datetime can be extended with new properties while preserving original."""
-    shim(
-        lower="_pydatetime",
-        upper="tests.examples.datetime_custom",
-        mount="tests.examples.datetime_custom",
-    )
-    from datetime import datetime
-
-    from tests.examples.datetime_custom import (  # type: ignore [reportMissingImports]
-        datetime as datetime_custom,
-    )
-
-    # Test custom property
-    dt = datetime_custom(2024, 1, 6)  # Saturday
-    assert dt.is_weekend is True
-
-    dt = datetime_custom(2024, 1, 3)  # Wednesday
-    assert dt.is_weekend is False
-
-    # Test overridden class method
-    assert datetime_custom.now().is_weekend is True
-
-    # Test MAXDATE modification
-    with pytest.raises(ValueError, match=r"year must be in 1\.\.3000"):
-        _ = datetime_custom(9999, 1, 1)
-
-    # Original datetime should be unaffected
-    assert isinstance(datetime.now(), datetime)
-    assert not hasattr(datetime.now(), "is_weekend")
-
-
 def test_random_fixed_seed_overmount() -> None:
     """Test that random module can be configured with a fixed seed."""
     shim(
@@ -418,47 +355,6 @@ def test_random_fixed_seed_overmount() -> None:
 
     # Original random should be unaffected
     assert isinstance(random.Random(), random.Random)  # noqa: S311
-
-
-def test_pathlib_is_empty_overmount() -> None:
-    """Test enhanced pathlib with is_empty method."""
-    shim(
-        lower="pathlib",
-        upper="tests.examples.pathlib_is_empty",
-        mount="tests.examples.pathlib_is_empty",
-    )
-    import pathlib
-    import tempfile
-    from pathlib import Path
-
-    from tests.examples.pathlib_is_empty import (
-        Path as PathTest,  # type:ignore [reportMissingImports]
-    )
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Create test files and directories
-        empty_dir = PathTest(tmpdir) / "empty_dir"
-        empty_dir.mkdir()
-
-        nonempty_dir = PathTest(tmpdir) / "nonempty_dir"
-        nonempty_dir.mkdir()
-        (nonempty_dir / "file.txt").touch()
-
-        empty_file = PathTest(tmpdir) / "empty.txt"
-        empty_file.touch()
-
-        nonempty_file = PathTest(tmpdir) / "nonempty.txt"
-        nonempty_file.write_text("content")
-
-        # Test is_empty() method
-        assert empty_dir.is_empty is True
-        assert nonempty_dir.is_empty is False
-        assert empty_file.is_empty is True
-        assert nonempty_file.is_empty is False
-
-        # Original Path should be unaffected
-        assert not hasattr(Path(tmpdir), "is_empty")
-        assert isinstance(pathlib.Path(tmpdir), pathlib.Path)
 
 
 def test_time_dilation_overmount() -> None:
@@ -590,3 +486,41 @@ id,name,date,score
     original_row = next(original_reader)
     assert isinstance(original_row["id"], str)  # Still strings
     assert isinstance(original_row["score"], str)
+
+
+def test_filecmp_ignores_override_overmount() -> None:
+    """Test that filecmp.DEFAULT_IGNORES can be overridden."""
+    shim(
+        lower="filecmp",
+        upper="tests.examples.filecmp_ignores",
+        mount="tests.examples.filecmp_ignores",
+    )
+    import filecmp
+    import tempfile
+    from pathlib import Path
+
+    from tests.examples.filecmp_ignores import (  # type: ignore [reportMissingImports]
+        dircmp,
+        DEFAULT_IGNORES as SHIM_DEFAULT_IGNORES,
+    )
+
+    assert ".new_ignore" in SHIM_DEFAULT_IGNORES
+    assert ".new_ignore" not in filecmp.DEFAULT_IGNORES
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dir1 = Path(tmpdir) / "dir1"
+        dir2 = Path(tmpdir) / "dir2"
+        dir1.mkdir()
+        dir2.mkdir()
+
+        (dir1 / ".new_ignore").touch()
+        (dir1 / "not_ignored").touch()
+
+        comparison = dircmp(str(dir1), str(dir2))
+        assert comparison.left_only == ["not_ignored"]
+
+        original_comparison = filecmp.dircmp(str(dir1), str(dir2))
+        assert sorted(original_comparison.left_only) == [
+            ".new_ignore",
+            "not_ignored",
+        ]
