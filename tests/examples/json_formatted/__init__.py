@@ -21,6 +21,8 @@ def dumps(obj: dict[str, Any], *args: Any, **kwargs: Any) -> str:
     kwargs["sort_keys"] = True
 
     # Get the dumps from the lower module (a merged module in this case)
-    from json_single_quotes import dumps as lower_dumps
+    from json_single_quotes import (
+        dumps as lower_dumps,  # type: ignore [reportAttributeAccessIssue]
+    )
 
     return lower_dumps(obj, *args, **kwargs)

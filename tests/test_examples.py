@@ -18,7 +18,7 @@ def test_json_single_quotes_override() -> None:
     import json_single_quotes as json_test  # type: ignore [reportMissingImports]
 
     data = {"name": "test", "list": ["a", "b"]}
-    result = json_test.dumps(data)
+    result = json_test.dumps(data)  # type: ignore [reportAttributeAccessIssue]
     original_result = json.dumps(data)
 
     # Our version uses single quotes
@@ -288,7 +288,8 @@ def test_json_single_quotes_override_overmount() -> None:
     import tests.examples.json_single_quotes as json_test  # type: ignore [reportMissingImports]
 
     data = {"name": "test", "list": ["a", "b"]}
-    result = json_test.dumps(data)
+    result = json_test.dumps(data)  # type: ignore [reportAttributeAccessIssue]
+
     original_result = json.dumps(data)
 
     # Our version uses single quotes
