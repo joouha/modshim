@@ -10,13 +10,13 @@ import ast
 import logging
 import marshal
 import os
+import os.path
 import sys
 import threading
 from importlib import import_module
 from importlib.abc import InspectLoader, Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import find_spec, module_from_spec
-from pathlib import Path
 from types import CodeType, ModuleType
 from typing import TYPE_CHECKING, ClassVar, cast
 
@@ -146,7 +146,7 @@ def get_cache_path(
     original_module_name: str,
     *,
     optimization: str | int | None = None,
-) -> Path:
+) -> str:
     """Given the path to a .py file, return the path to its .pyc file.
 
     The .py file does not need to exist; this simply returns the path to the
@@ -160,8 +160,8 @@ def get_cache_path(
 
     If sys.implementation.cache_tag is None then NotImplementedError is raised.
     """
-    upper_path = Path(upper_file_path)
-    cache_dir = upper_path.parent / "__modshim__"
+    upper_path, _filename = os.path.split(upper_file_path)
+    cache_dir = os.path.join(upper_path, "__modshim__")
 
     tag = sys.implementation.cache_tag
     if tag is None:
@@ -177,7 +177,7 @@ def get_cache_path(
             raise ValueError(f"{optimization!r} is not alphanumeric")
         stem = f"{stem}._OPT{optimization}"
 
-    filename = cache_dir / f"{stem}.pyc"
+    filename = os.path.join(cache_dir, f"{stem}.pyc")
     return filename
 
 
@@ -282,28 +282,26 @@ class ModShimLoader(Loader):
         if not origin or origin.startswith("<") or not upper_origin:
             return None
 
-        source_path = Path(origin)
-
         # Create cache filename that includes the mount point to avoid conflicts
         cache_path = get_cache_path(
             upper_file_path=upper_origin,
             mount_root=self.mount_root,
             original_module_name=spec.name,
         )
-        if not cache_path.exists():
+        if not os.path.exists(cache_path):
             return None
 
         try:
-            source_stat = source_path.stat()
+            source_stat = os.stat(origin)
         except OSError:
             return None
 
         # Check if cache exists and is newer than source
-        if cache_path.stat().st_mtime <= source_stat.st_mtime:
+        if os.stat(cache_path).st_mtime <= source_stat.st_mtime:
             return None
 
         # Read and validate cache
-        with cache_path.open("rb") as f:
+        with open(cache_path, "rb") as f:
             # Read magic number and timestamp
             magic = f.read(4)
             if magic != self._magic_number:
@@ -335,8 +333,7 @@ class ModShimLoader(Loader):
             return None
 
         try:
-            source_path = Path(origin)
-            source_stat = source_path.stat()
+            source_stat = os.stat(origin)
         except OSError:
             # Cannot get source stats, so cannot cache.
             return
@@ -351,11 +348,12 @@ class ModShimLoader(Loader):
             original_module_name=spec.name,
         )
         # Ensure cache directory exists
-        cache_path.parent.mkdir(exist_ok=True, parents=True)
+        cache_path_parent, _ = os.path.split(cache_path)
+        os.makedirs(cache_path_parent, exist_ok=True)
 
         # Write cache file
         try:
-            with cache_path.open("wb") as f:
+            with open(cache_path, "wb") as f:
                 # Write magic number and timestamp/size
                 f.write(self._magic_number)
                 f.write((source_mtime & 0xFFFFFFFF).to_bytes(4, "little"))

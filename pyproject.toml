@@ -40,7 +40,6 @@ select = [ # "ANN", "B", "C", "D", "E", "F", "I", "Q", "S", "T", "UP"]
   "I",
   "PIE", # miscellaneous lints
   "PT",  # common style issues or inconsistencies with pytest-based tests
-  "PTH", # use pathlib
   "Q",   # quotes
   "S",   # bandit security testingi
   "RUF", # ruff-specific
