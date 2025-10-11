@@ -7,11 +7,11 @@ A Python library for enhancing existing modules without modifying their source c
 `modshim` allows you to overlay custom functionality onto existing Python modules while preserving their original behavior. This is particularly useful when you need to:
 
 - Fix bugs in third-party libraries without forking
-- Modify behavior of existing functions
+- Modify the behavior of existing functions
 - Add new features or options to existing classes
 - Test alternative implementations in an isolated way
 
-It works by creating a new, "shimmed" module that combines the original code with your enhancements, without ever touching the original module.
+It works by creating a new, "shimmed" module that combines the original code with your enhancements, without modifying the original module.
 
 ## Installation
 
@@ -23,7 +23,7 @@ pip install modshim
 
 Suppose we want to enhance the standard library's `textwrap` module. Our goal is to add a `prefix` argument to `TextWrapper` to prepend a string to every wrapped line.
 
-First, create a Python module containing your modifications. It should mirror the structure of the original `textwrap` module.
+First, create a Python module containing your modifications. It should mirror the structure of the original `textwrap` module, redefining only the parts we want to modify. For classes like `TextWrapper`, this can be done by creating a subclass with the same name as the original class:
 
 ```python
 # prefixed_textwrap.py
@@ -45,7 +45,6 @@ class TextWrapper(OriginalTextWrapper):
         if not self.prefix:
             return original_lines
         return [f"{self.prefix}{line}" for line in original_lines]
-
 ```
 
 Next, use `modshim` to mount your modifications over the original `textwrap` module, creating a new, combined module.
@@ -59,7 +58,7 @@ Next, use `modshim` to mount your modifications over the original `textwrap` mod
 ... )
 ```
 
-Now, you can import from `super_textwrap`. Notice how we can call the original `wrap()` convenience function, but pass our new `prefix` argument. This works because `modshim` ensures that the original `wrap` function now uses our enhanced `TextWrapper` class internally, demonstrating a deep integration of your changes.
+Now, you can import from `super_textwrap`. Notice how we can call the original `wrap()` convenience function, but pass our new `prefix` argument. This works because our modifications are overlaid on the original `textwrap` module, so the merged `super_textwrap` module uses our enhanced `TextWrapper` class inside the `wrap` function instead of the original.
 
 ```python
 >>> from super_textwrap import wrap
@@ -99,7 +98,7 @@ TypeError: TextWrapper.__init__() got an unexpected keyword argument 'prefix'
 
 You can create packages that automatically apply a shim to another module, making your enhancements available just by importing your package.
 
-This is done by calling `shim()` from within your package's code and using your own package's name as the `mount` point.
+This is done by calling `shim()` from within your package's code and using your own package's name as the `mount` point, so your package gets "replaced" with new merged module.
 
 To adapt our `textwrap` example, we could create a `super_textwrap.py` file like this:
 
@@ -129,7 +128,7 @@ shim(lower="textwrap")
 # - The `mount` parameter defaults to `upper`, so it is also 'super_textwrap'.
 ```
 
-Now, anyone can use your enhanced version simply by importing your package. The original `wrap` function from `textwrap` is now available with the new `prefix` functionality.
+Now, anyone can use your enhanced version simply by importing your package:
 
 ```python
 >>> from super_textwrap import wrap
@@ -147,7 +146,7 @@ Now, anyone can use your enhanced version simply by importing your package. The 
 
 Let's tackle a more complex, real-world scenario. We want to add a robust, configurable retry mechanism to `requests` for handling transient network issues or server errors. The standard way to do this in `requests` is by creating a `Session` object and mounting a custom `HTTPAdapter`.
 
-With `modshim`, we can create an enhanced `Session` class that automatically configures retries, and then overlay it onto the original `requests` library. To do this correctly, our enhancement package (`requests_extra`) must mirror the structure of the original `requests` package.
+With `modshim`, we can create an enhanced `Session` class that automatically conﬁgures retries, and then overlay it onto the original `requests` library. To do this correctly, our enhancement package (`requests_extra`) must mirror the structure of the original `requests` package.
 
 ### Step 1: Create the Enhancement Package
 
@@ -162,7 +161,7 @@ This is the entry point to our package. It contains the magic `shim` call.
 
 from modshim import shim
 
-# This mounts our 'requests_extra' package over the original 'requests' package.
+# This overlays our 'requests_extra' package on the original 'requests' package.
 # Because 'mount' isn't specified, it defaults to our package name ('requests_extra').
 # When a submodule like 'requests_extra.sessions' is imported, modshim will
 # automatically merge it with the original 'requests.sessions'.
@@ -171,13 +170,13 @@ shim(lower="requests")
 
 **`requests_extra/sessions.py`**
 
-This file matches the location of the `Session` class in the original `requests` library (`requests/sessions.py`). Here, we define our enhanced `Session`:
+This file matches the location of the `Session` class in the original `requests` library (`requests/sessions.py`). Here, we define our enhanced `Session` with the new functionality, by subclassing the original `Session` implementation:
 
 ```python
 # requests_extra/sessions.py
 
 from requests.adapters import HTTPAdapter
-# We must import from the original module's path for the override to work
+# We will create a new version of `Session` by subclassing the original
 from requests.sessions import Session as OriginalSession
 from urllib3.util.retry import Retry
 
@@ -194,7 +193,7 @@ class Session(OriginalSession):
 
     def __init__(self, *args, **kwargs):
         # Extract our custom arguments before calling the parent constructor
-        retries = kwargs.pop("retries", 0)
+        retries = kwargs.pop("retries", 3)
         backoff_factor = kwargs.pop("backoff_factor", 0.1)
         status_forcelist = kwargs.pop("status_forcelist", (500, 502, 503, 504))
 
@@ -214,51 +213,37 @@ class Session(OriginalSession):
 
 ### Step 2: Use the Enhanced `requests`
 
-Now, you can import `Session` from your `requests_extra` package. It behaves just like the original, but with new superpowers. For advanced usage like this, `requests` best practices recommend creating a `Session` object.
+Because our enhanced Session class now enables retries by default, we don't even need to instantiate it directly. `modshim`'s AST rewriting ensures that internal references within the requests module are updated. This means convenience functions like `requests.get()` will automatically use our enhanced `Session` class:
 
 ```python
-# main.py
-
-# By importing from our shimmed package, we get the enhanced Session class.
-from requests_extra import Session, exceptions
+# Configure logging to show the retry attempts
 import logging
-
 logger = logging.getLogger("urllib3.util.retry")
 logger.setLevel(logging.DEBUG)
 logger.addHandler(logging.StreamHandler())
 
-url = "https://httpbin.org/status/503"
-print(f"Creating a session with 3 retries for status 503...")
-
-# Create an instance of our enhanced Session with retry parameters.
-with Session(retries=3, backoff_factor=0.2, status_forcelist=[503]) as session:
-    try:
-        # Use the session to make a request.
-        response = session.get(url, timeout=5)
-
-        print(f"\nFinal response status: {response.status_code}")
-
-    except exceptions.RetryError as e:
-        # This exception is raised if retries are exhausted.
-        print(f"\nRequest failed after all retries: {e}")
+# Use our enhanced module
+import requests_extra
+try:
+    response = requests_extra.get("https://httpbin.org/status/503")
+except Exception as e:
+    print(e)
 ```
 
-When you run this code, you will see `urllib3`'s log messages showing the retries in action:
+When you run this code, you will see urllib3's log messages showing the retries in action, followed by the final caught exception:
 
 ```
-Creating a session with 3 retries for status 503...
 Incremented Retry for (url='/status/503'): Retry(total=2, connect=None, read=None, redirect=None, status=None)
 Incremented Retry for (url='/status/503'): Retry(total=1, connect=None, read=None, redirect=None, status=None)
 Incremented Retry for (url='/status/503'): Retry(total=0, connect=None, read=None, redirect=None, status=None)
-
-Request failed after all retries: ...: Max retries exceeded with url: /status/503 ...
+HTTPSConnectionPool(host='httpbin.org', port=443): Max retries exceeded with url: /status/503 (Caused by ResponseError('too many 503 error responses'))
+...
 ```
 
-### Why this is a powerful example:
+### Benefits of this Approach
 
-*   **Deep, Structural Integration:** We didn't just override a top-level function. We replaced a core class (`Session`) deep within a submodule (`sessions`). `modshim` handled the structural mapping automatically, so `from requests_extra import Session` just works.
-*   **Clean and Idiomatic:** The enhancement uses the officially recommended `HTTPAdapter` pattern, making it robust. The new `Session` class is a clean, subclass-based extension.
-*   **Completely Isolated:** The original `requests` module is untouched. Code that imports `requests` directly will get the original `Session` object without any retry logic, preventing unintended side-effects.
+- **Internal Reference Rewriting**: This example demonstrates `modshim`'s most powerful feature. By replacing `requests.sessions.Session`, we automatically upgraded top-level functions like `requests.get()` because their internal references to Session are redirected to our new class.
+- **Preservation of the Original Module**: The original `requests` package is not altered. Code in other parts of an application that imports `requests` directly will continue to use the original `Session` object without any retry logic, preventing unintended side-effects.
 
 ## How It Works
 
