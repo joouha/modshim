@@ -724,6 +724,9 @@ def shim(lower: str, upper: str = "", mount: str = "") -> None:
         # This fixes issues when modules are mounted over their uppers
         if mount in sys.modules:
             del sys.modules[mount]
+            for name in list(sys.modules):
+                if name.startswith(f"{mount}."):
+                    del sys.modules[name]
             _ = import_module(mount)
 
     finally:
