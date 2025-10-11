@@ -242,3 +242,77 @@ def test_auto_shim_from_upper() -> None:
     assert hasattr(tests.cases.auto_mount_upper.extra, "y"), (
         "Cannot access attribute in extra upper module"
     )
+
+
+def test_shim_call_at_start() -> None:
+    """Test auto-shimming when shim() is called at the start of the upper module."""
+    # Importing the upper module triggers the auto-shim.
+    # The mount point becomes tests.cases.shim_call_ordering_upper_start
+    try:
+        # Import a module from the lower package, through the upper package mount
+        import tests.cases.shim_call_ordering_upper_start.mod  # pyright: ignore [reportMissingImports]
+
+        assert True
+    except ImportError as exc:
+        raise AssertionError(
+            "Import of `tests.cases.shim_call_ordering_upper_start.mod` failed"
+        ) from exc
+
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.shim_call_ordering_upper_start, ModuleType)
+    assert isinstance(tests.cases.shim_call_ordering_upper_start.mod, ModuleType)
+    assert hasattr(tests.cases.shim_call_ordering_upper_start.mod, "x")
+    assert tests.cases.shim_call_ordering_upper_start.mod.x == 100
+
+    try:
+        # Import an extra module from the upper package
+        import tests.cases.shim_call_ordering_upper_start.extra  # pyright: ignore [reportMissingImports]
+
+        assert True
+    except ImportError as exc:
+        raise AssertionError(
+            "Import of `tests.cases.shim_call_ordering_upper_start.extra` failed"
+        ) from exc
+
+    assert isinstance(tests.cases.shim_call_ordering_upper_start.extra, ModuleType)
+    assert hasattr(tests.cases.shim_call_ordering_upper_start.extra, "y")
+    assert tests.cases.shim_call_ordering_upper_start.extra.y == 200
+    assert tests.cases.shim_call_ordering_upper_start.some_var == "start"
+
+
+def test_shim_call_at_end() -> None:
+    """Test auto-shimming when shim() is called at the end of the upper module."""
+    # Importing the upper module triggers the auto-shim.
+    # The mount point becomes tests.cases.shim_call_ordering_upper_end
+    try:
+        # Import a module from the lower package, through the upper package mount
+        import tests.cases.shim_call_ordering_upper_end.mod  # pyright: ignore [reportMissingImports]
+
+        assert True
+    except ImportError as exc:
+        raise AssertionError(
+            "Import of `tests.cases.shim_call_ordering_upper_end.mod` failed"
+        ) from exc
+
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.shim_call_ordering_upper_end, ModuleType)
+    assert isinstance(tests.cases.shim_call_ordering_upper_end.mod, ModuleType)
+    assert hasattr(tests.cases.shim_call_ordering_upper_end.mod, "x")
+    assert tests.cases.shim_call_ordering_upper_end.mod.x == 100
+
+    try:
+        # Import an extra module from the upper package
+        import tests.cases.shim_call_ordering_upper_end.extra  # pyright: ignore [reportMissingImports]
+
+        assert True
+    except ImportError as exc:
+        raise AssertionError(
+            "Import of `tests.cases.shim_call_ordering_upper_end.extra` failed"
+        ) from exc
+
+    assert isinstance(tests.cases.shim_call_ordering_upper_end.extra, ModuleType)
+    assert hasattr(tests.cases.shim_call_ordering_upper_end.extra, "y")
+    assert tests.cases.shim_call_ordering_upper_end.extra.y == 200
+    assert tests.cases.shim_call_ordering_upper_end.some_var == "end"
