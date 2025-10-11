@@ -690,14 +690,15 @@ def shim(lower: str, upper: str = "", mount: str = "") -> None:
         if not upper:
             import inspect
 
-            # Get the caller's frame to find its module
-            frame = inspect.currentframe()
-            if frame is not None:
-                upper = frame.f_globals.get("__package__", "")
-                if not upper:
-                    upper = frame.f_globals.get("__name__", "")
-                    if upper == "__main__":
-                        raise ValueError("Cannot determine package name from __main__")
+            # Go back one level in the stack to see where this was called from
+            if (frame := inspect.currentframe()) is not None and (
+                prev_frame := frame.f_back
+            ) is not None:
+                upper = prev_frame.f_globals.get(
+                    "__package__", prev_frame.f_globals.get("__name__", "")
+                )
+                if upper == "__main__":
+                    raise ValueError("Cannot determine package name from __main__")
             if not upper:
                 raise ValueError("Upper module name cannot be determined")
 
