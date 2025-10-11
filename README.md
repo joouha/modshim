@@ -143,6 +143,142 @@ Now, anyone can use your enhanced version simply by importing your package. The 
 * multiple lines.
 ```
 
+## Advanced Example: Adding Configurable Retries to `requests`
+
+Let's tackle a more complex, real-world scenario. We want to add a robust, configurable retry mechanism to `requests` for handling transient network issues or server errors. The standard way to do this in `requests` is by creating a `Session` object and mounting a custom `HTTPAdapter`.
+
+With `modshim`, we can create an enhanced `Session` class that automatically configures retries, and then overlay it onto the original `requests` library. To do this correctly, our enhancement package (`requests_extra`) must mirror the structure of the original `requests` package.
+
+### Step 1: Create the Enhancement Package
+
+We'll create a package named `requests_extra` with two files.
+
+**`requests_extra/__init__.py`**
+
+This is the entry point to our package. It contains the magic `shim` call.
+
+```python
+# requests_extra/__init__.py
+
+from modshim import shim
+
+# This mounts our 'requests_extra' package over the original 'requests' package.
+# Because 'mount' isn't specified, it defaults to our package name ('requests_extra').
+# When a submodule like 'requests_extra.sessions' is imported, modshim will
+# automatically merge it with the original 'requests.sessions'.
+shim(lower="requests")
+```
+
+**`requests_extra/sessions.py`**
+
+This file matches the location of the `Session` class in the original `requests` library (`requests/sessions.py`). Here, we define our enhanced `Session`:
+
+```python
+# requests_extra/sessions.py
+
+from requests.adapters import HTTPAdapter
+# We must import from the original module's path for the override to work
+from requests.sessions import Session as OriginalSession
+from urllib3.util.retry import Retry
+
+
+class Session(OriginalSession):
+    """
+    Enhanced Session that adds automatic, configurable retries via a mounted HTTPAdapter.
+
+    Accepts new keyword arguments in its constructor:
+    - retries (int): Total number of retries to allow.
+    - backoff_factor (float): A factor to apply between retry attempts.
+    - status_forcelist (iterable): A set of HTTP status codes to force a retry on.
+    """
+
+    def __init__(self, *args, **kwargs):
+        # Extract our custom arguments before calling the parent constructor
+        retries = kwargs.pop("retries", 0)
+        backoff_factor = kwargs.pop("backoff_factor", 0.1)
+        status_forcelist = kwargs.pop("status_forcelist", (500, 502, 503, 504))
+
+        super().__init__(*args, **kwargs)
+
+        # If retries are configured, create a retry strategy and mount it
+        if retries > 0:
+            retry_strategy = Retry(
+                total=retries,
+                backoff_factor=backoff_factor,
+                status_forcelist=status_forcelist,
+            )
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            self.mount("https://", adapter)
+            self.mount("http://", adapter)
+```
+
+### Step 2: Use the Enhanced `requests`
+
+Now, you can import `Session` from your `requests_extra` package. It behaves just like the original, but with new superpowers. For advanced usage like this, `requests` best practices recommend creating a `Session` object.
+
+```python
+# main.py
+
+# By importing from our shimmed package, we get the enhanced Session class.
+from requests_extra import Session, exceptions
+import logging
+
+logger = logging.getLogger("urllib3.util.retry")
+logger.setLevel(logging.DEBUG)
+logger.addHandler(logging.StreamHandler())
+
+url = "https://httpbin.org/status/503"
+print(f"Creating a session with 3 retries for status 503...")
+
+# Create an instance of our enhanced Session with retry parameters.
+with Session(retries=3, backoff_factor=0.2, status_forcelist=[503]) as session:
+    try:
+        # Use the session to make a request.
+        response = session.get(url, timeout=5)
+
+        print(f"\nFinal response status: {response.status_code}")
+
+    except exceptions.RetryError as e:
+        # This exception is raised if retries are exhausted.
+        print(f"\nRequest failed after all retries: {e}")
+```
+
+When you run this code, you will see `urllib3`'s log messages showing the retries in action:
+
+```
+Creating a session with 3 retries for status 503...
+Incremented Retry for (url='/status/503'): Retry(total=2, connect=None, read=None, redirect=None, status=None)
+Incremented Retry for (url='/status/503'): Retry(total=1, connect=None, read=None, redirect=None, status=None)
+Incremented Retry for (url='/status/503'): Retry(total=0, connect=None, read=None, redirect=None, status=None)
+
+Request failed after all retries: ...: Max retries exceeded with url: /status/503 ...
+```
+
+### Why this is a powerful example:
+
+*   **Deep, Structural Integration:** We didn't just override a top-level function. We replaced a core class (`Session`) deep within a submodule (`sessions`). `modshim` handled the structural mapping automatically, so `from requests_extra import Session` just works.
+*   **Clean and Idiomatic:** The enhancement uses the officially recommended `HTTPAdapter` pattern, making it robust. The new `Session` class is a clean, subclass-based extension.
+*   **Completely Isolated:** The original `requests` module is untouched. Code that imports `requests` directly will get the original `Session` object without any retry logic, preventing unintended side-effects.
+
+## How It Works
+
+`modshim` creates virtual merged modules by intercepting Python's import system. At its core, modshim works by installing a custom import finder (`ModShimFinder`) into `sys.meta_path`.
+
+When you call `shim()`, it registers a mapping between three module names: the "lower" (original) module, the "upper" (enhancement) module, and the "mount" point (the name under which the combined module will be accessible).
+
+When the mounted module is imported, the finder:
+
+1. Locates both the lower and upper modules using Python's standard import machinery.
+2. Creates a new virtual module at the mount point.
+3. Executes the lower module's code first, establishing the base functionality.
+4. Executes the upper module's code, which can override or extend the lower module's attributes.
+5. Handles imports within these modules by rewriting their ASTs (Abstract Syntax Trees) to redirect internal references to the new mount point.
+
+This AST transformation is key. It ensures that when code in either module imports from its own package (e.g., a relative import), those imports are redirected to the new, combined module. This maintains consistency and prevents circular import issues.
+
+The system is thread-safe, handles sub-modules recursively, and supports bytecode caching for performance. All of this happens without modifying any source code on disk.
+
+
 ## Why Not Monkey-Patch?
 
 Monkey-patching involves altering a module or class at runtime. For example, you might replace `textwrap.TextWrapper` with your custom class.
@@ -162,24 +298,6 @@ This approach has major drawbacks:
 - **Poor Readability:** It's hard to track where modifications are applied and what version of a class or function is actually being used.
 
 `modshim` avoids these problems by creating a **new, separate, and isolated module**. The original `textwrap` is never touched. You explicitly import from your mount point (`super_textwrap`) when you want the enhanced functionality. This provides clear, predictable, and maintainable code.
-
-## How It Works
-
-`modshim` creates virtual merged modules by intercepting Python's import system. At its core, modshim works by installing a custom import finder (`ModShimFinder`) into `sys.meta_path`.
-
-When you call `shim()`, it registers a mapping between three module names: the "lower" (original) module, the "upper" (enhancement) module, and the "mount" point (the name under which the combined module will be accessible).
-
-When the mounted module is imported, the finder:
-
-1. Locates both the lower and upper modules using Python's standard import machinery.
-2. Creates a new virtual module at the mount point.
-3. Executes the lower module's code first, establishing the base functionality.
-4. Executes the upper module's code, which can override or extend the lower module's attributes.
-5. Handles imports within these modules by rewriting their ASTs (Abstract Syntax Trees) to redirect internal references to the new mount point.
-
-This AST transformation is key. It ensures that when code in either module imports from its own package (e.g., a relative import), those imports are redirected to the new, combined module. This maintains consistency and prevents circular import issues.
-
-The system is thread-safe, handles sub-modules recursively, and supports bytecode caching for performance. All of this happens without modifying any source code on disk.
 
 
 ## Why Not Vendor?
