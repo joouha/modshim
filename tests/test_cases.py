@@ -186,3 +186,45 @@ def test_extras_import_overmount_auto() -> None:
     assert hasattr(tests.cases.extras_b.extra, "y"), (
         "Cannot access attribute in extra upper module"
     )
+
+
+def test_auto_shim_from_upper() -> None:
+    """Test calling shim() with only the 'lower' argument from the upper package."""
+    # The shim is called inside tests.cases.auto_mount_upper's __init__.py
+    # When we import it, it should shim itself over auto_mount_lower
+    try:
+        # Import a module from the lower package, through the upper package mount
+        import tests.cases.auto_mount_upper.mod  # pyright: ignore [reportMissingImports]
+
+        assert True
+    except ImportError as exc:
+        raise AssertionError(
+            "Import of `tests.cases.auto_mount_upper.mod` failed"
+        ) from exc
+
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.auto_mount_upper, ModuleType)
+    assert isinstance(tests.cases.auto_mount_upper.mod, ModuleType)
+    assert hasattr(tests.cases.auto_mount_upper.mod, "x"), (
+        "Cannot access attribute in lower module"
+    )
+    assert tests.cases.auto_mount_upper.mod.x == 11
+
+    try:
+        # Import an extra module from the upper package
+        import tests.cases.auto_mount_upper.extra
+
+        assert True
+    except ImportError as exc:
+        raise AssertionError(
+            "Import of `tests.cases.auto_mount_upper.extra` failed"
+        ) from exc
+
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.auto_mount_upper, ModuleType)
+    assert isinstance(tests.cases.auto_mount_upper.extra, ModuleType)
+    assert hasattr(tests.cases.auto_mount_upper.extra, "y"), (
+        "Cannot access attribute in extra upper module"
+    )
