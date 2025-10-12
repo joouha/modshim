@@ -1,6 +1,6 @@
 # modshim
 
-A Python library for enhancing existing modules without modifying their source code - a clean alternative to vendoring and monkey-patching.
+A Python library for enhancing existing modules without modifying their source code - a clean alternative to forking, vendoring, and monkey-patching.
 
 ## Overview
 
@@ -283,6 +283,18 @@ This approach has major drawbacks:
 - **Poor Readability:** It's hard to track where modifications are applied and what version of a class or function is actually being used.
 
 `modshim` avoids these problems by creating a **new, separate, and isolated module**. The original `textwrap` is never touched. You explicitly import from your mount point (`super_textwrap`) when you want the enhanced functionality. This provides clear, predictable, and maintainable code.
+
+
+## Why Not Fork?
+
+Forking a project means creating your own copy of its entire codebase. While this gives you total control, it comes with significant downsides:
+
+- **Maintenance Overhead:** You become the maintainer of the forked library. When the original project releases updates, bug fixes, or security patches, you have to manually merge them into your fork. This can be time-consuming and complex.
+- **Divergence:** Over time, your fork can drift away from the original, making it increasingly difficult to incorporate upstream changes.
+- **Dependency Complexity:** Your project now depends on your custom fork, not the official version. This complicates deployment and can be confusing for other developers who might not realize they're using a non-standard version of the library.
+- **Bridging Contribution Gaps:** Contributing changes upstream is ideal, but open-source maintainers may be slow or reluctant to merge them due to differing priorities, project vision, or contribution backlogs. Forking in response creates a permanent schism and a significant maintenance burden for what might be a small change.
+
+`modshim` offers a more lightweight and strategic alternative. It allows you to apply necessary changes immediately for your own project's needs without waiting for upstream review. Your enhancements live in a small, separate package that depends on the *official* upstream library. This keeps your changes cleanly isolated, eliminates the maintenance burden of a full fork, and makes it easy to continue tracking upstream updates. If you still intend to contribute your changes, `modshim` keeps your patch separate and ready for a future pull request.
 
 
 ## Why Not Vendor?
