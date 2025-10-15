@@ -31,48 +31,47 @@ if os.getenv("MODSHIM_DEBUG"):
 
 
 class _ModuleReferenceRewriter(ast.NodeTransformer):
-    """AST transformer that rewrites module references to point to the mount point."""
+    """AST transformer that rewrites module references based on a set of rules."""
 
-    search: str
-    replace: str
+    rules: list[tuple[str, str]]
     dirty: bool = False
+
+    def _rewrite_name(self, name: str) -> str:
+        """Apply all rewrite rules sequentially to a module name."""
+        current_name = name
+        for search, replace in self.rules:
+            if current_name == search:
+                current_name = replace
+            elif current_name.startswith(f"{search}."):
+                suffix = current_name[len(search) :]
+                current_name = f"{replace}{suffix}"
+        return current_name
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.ImportFrom:
         """Rewrite 'from X import Y' statements."""
-        # If this is an import from the original module or its submodules,
-        # rewrite it to import from the mount point
-        if node.module and (
-            node.module == self.search or node.module.startswith(f"{self.search}.")
-        ):
-            # Replace the original module name with the mount point
-            if node.module == self.search:
-                new_module = self.replace
-            else:
-                # Handle submodule imports
-                suffix = node.module[len(self.search) :]
-                new_module = f"{self.replace}{suffix}"
+        if not node.module:
+            return node
 
+        new_name = self._rewrite_name(node.module)
+
+        if new_name != node.module:
             self.dirty = True
-            return ast.ImportFrom(module=new_module, names=node.names, level=node.level)
+            return ast.ImportFrom(module=new_name, names=node.names, level=node.level)
         return node
 
     def visit_Import(self, node: ast.Import) -> ast.Import:
         """Rewrite 'import X' statements."""
         new_names: list[ast.alias] = []
         made_change = False
-        for name in node.names:
-            if name.name == self.search:
+        for alias in node.names:
+            original_name = alias.name
+            new_name = self._rewrite_name(original_name)
+
+            if new_name != original_name:
                 made_change = True
-                # Replace the original module name with the mount point
-                new_names.append(ast.alias(name=self.replace, asname=name.asname))
-            elif name.name.startswith(f"{self.search}."):
-                made_change = True
-                # Handle submodule imports
-                suffix = name.name[len(self.search) :]
-                new_name = f"{self.replace}{suffix}"
-                new_names.append(ast.alias(name=new_name, asname=name.asname))
+                new_names.append(ast.alias(name=new_name, asname=alias.asname))
             else:
-                new_names.append(name)
+                new_names.append(alias)
 
         if made_change:
             self.dirty = True
@@ -85,38 +84,41 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
         node = cast("ast.Attribute", self.generic_visit(node))
 
         # Check if this is a reference to the original module
-        if isinstance(node.value, ast.Name) and node.value.id == self.search:
-            # Replace the module name with the mount point
-            self.dirty = True
+        if isinstance(node.value, ast.Name):
+            original_name = node.value.id
+            new_name = self._rewrite_name(original_name)
 
-            # Create a proper attribute access chain from the replacement string.
-            # This prevents creating an invalid ast.Name with dots in it.
-            parts = self.replace.split(".")
-            # Start with the first part as a Name node
-            new_value: ast.expr = ast.Name(id=parts[0], ctx=node.value.ctx)
-            # Chain the rest as Attribute nodes
-            for part in parts[1:]:
-                new_value = ast.Attribute(value=new_value, attr=part, ctx=ast.Load())
+            if new_name != original_name:
+                self.dirty = True
 
-            return ast.Attribute(
-                value=new_value,
-                attr=node.attr,
-                ctx=node.ctx,
-            )
+                # Create a proper attribute access chain from the replacement string.
+                # This prevents creating an invalid ast.Name with dots in it.
+                parts = new_name.split(".")
+                # Start with the first part as a Name node
+                new_value: ast.expr = ast.Name(id=parts[0], ctx=node.value.ctx)
+                # Chain the rest as Attribute nodes
+                for part in parts[1:]:
+                    new_value = ast.Attribute(
+                        value=new_value, attr=part, ctx=ast.Load()
+                    )
+
+                return ast.Attribute(
+                    value=new_value,
+                    attr=node.attr,
+                    ctx=node.ctx,
+                )
 
         return node
 
 
 def reference_rewrite_factory(
-    search: str, replace: str
+    rules: list[tuple[str, str]],
 ) -> type[_ModuleReferenceRewriter]:
     """Get an AST module reference rewriter."""
 
     class ReferenceRewriter(_ModuleReferenceRewriter): ...
 
-    ReferenceRewriter.search = search
-    ReferenceRewriter.replace = replace
-
+    ReferenceRewriter.rules = rules
     return ReferenceRewriter
 
 
@@ -253,23 +255,20 @@ class ModShimLoader(Loader):
         return module
 
     def rewrite_module_code(
-        self, code: str, search: str, replace: str
+        self, code: str, rules: list[tuple[str, str]]
     ) -> tuple[ast.AST, bool]:
         """Rewrite imports and module references in module code.
 
         Args:
             code: The source code to rewrite
-            search: The root package name to search for
-            replace: The root package name to replace with
+            rules: A list of (search, replace) tuples
 
         Returns:
             Tuple of the rewritten ast.AST and a bool signifying if any
                 modifications have been made
         """
         tree = ast.parse(code)
-
-        # Use the new transformer that handles both imports and module references
-        transformer = reference_rewrite_factory(search, replace)()
+        transformer = reference_rewrite_factory(rules)()
         new_tree = transformer.visit(tree)
         if not transformer.dirty:
             return tree, False
@@ -392,7 +391,7 @@ class ModShimLoader(Loader):
                 if source is not None:
                     # Rewrite the source to get an AST
                     tree, was_rewritten = self.rewrite_module_code(
-                        source, self.lower_root, self.mount_root
+                        source, [(self.lower_root, self.mount_root)]
                     )
                     if was_rewritten:
                         ast.fix_missing_locations(tree)
@@ -414,7 +413,7 @@ class ModShimLoader(Loader):
                         import linecache
 
                         tree, _ = self.rewrite_module_code(
-                            source, self.lower_root, self.mount_root
+                            source, [(self.lower_root, self.mount_root)]
                         )
                         rewritten_source = ast.unparse(tree)
                         linecache.cache[lower_filename] = (
@@ -465,23 +464,17 @@ class ModShimLoader(Loader):
             if code_obj is None:
                 source = get_module_source(upper_name, upper_spec)
                 if source is not None:
-                    # Perform chained AST transformations
-                    tree = ast.parse(source)
+                    # Perform combined AST transformations in one pass
+                    tree, dirty = self.rewrite_module_code(
+                        source,
+                        [
+                            (self.lower_root, self.mount_root),
+                            (module.__name__, working_name),
+                        ],
+                    )
 
-                    # First pass: rewrite lower_root -> mount_root
-                    transformer1 = reference_rewrite_factory(
-                        self.lower_root, self.mount_root
-                    )()
-                    tree = transformer1.visit(tree)
-
-                    # Second pass: rewrite current module -> working module
-                    transformer2 = reference_rewrite_factory(
-                        module.__name__, working_name
-                    )()
-                    tree = transformer2.visit(tree)
-
-                    # If any changes were made, fix locations and compile
-                    if transformer1.dirty or transformer2.dirty:
+                    # If any changes were made, fix locations
+                    if dirty:
                         ast.fix_missing_locations(tree)
 
                     code_obj = compile(cast("ast.Module", tree), upper_filename, "exec")
@@ -499,16 +492,14 @@ class ModShimLoader(Loader):
                     if source is not None:
                         import linecache
 
-                        # Chain transformations to get the final AST, then unparse
-                        tree = ast.parse(source)
-                        transformer1 = reference_rewrite_factory(
-                            self.lower_root, self.mount_root
-                        )()
-                        tree = transformer1.visit(tree)
-                        transformer2 = reference_rewrite_factory(
-                            module.__name__, working_name
-                        )()
-                        tree = transformer2.visit(tree)
+                        # Perform combined AST transformations to get the final AST, then unparse
+                        tree, dirty = self.rewrite_module_code(
+                            source,
+                            [
+                                (self.lower_root, self.mount_root),
+                                (module.__name__, working_name),
+                            ],
+                        )
 
                         rewritten_source = ast.unparse(tree)
                         linecache.cache[upper_filename] = (
