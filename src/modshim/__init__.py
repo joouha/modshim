@@ -542,16 +542,27 @@ class ModShimLoader(Loader):
                     if source is not None:
                         import linecache
 
-                        tree, _ = self.rewrite_module_code(
+                        # Determine if rewriting would have occurred
+                        tree, triggered = self.rewrite_module_code(
                             source, [(self.lower_root, self.mount_root)]
                         )
-                        rewritten_source = ast.unparse(tree)
-                        linecache.cache[lower_filename] = (
-                            len(rewritten_source),
-                            None,
-                            rewritten_source.splitlines(True),
-                            lower_filename,
-                        )
+
+                        if triggered:
+                            rewritten_source = ast.unparse(tree)
+                            linecache.cache[lower_filename] = (
+                                len(rewritten_source),
+                                None,
+                                rewritten_source.splitlines(True),
+                                lower_filename,
+                            )
+                        else:
+                            # No rewrite: executed code equals original source
+                            linecache.cache[lower_filename] = (
+                                len(source),
+                                None,
+                                source.splitlines(True),
+                                lower_filename,
+                            )
                     raise
         else:
             log.debug("No lower spec to execute")
@@ -683,8 +694,8 @@ class ModShimLoader(Loader):
                     if source is not None:
                         import linecache
 
-                        # Perform combined AST transformations to get the final AST, then unparse
-                        tree, _ = self.rewrite_module_code(
+                        # Perform combined AST transformations to get the final AST
+                        tree, triggered = self.rewrite_module_code(
                             source,
                             [
                                 (self.lower_root, self.mount_root),
@@ -692,13 +703,22 @@ class ModShimLoader(Loader):
                             ],
                         )
 
-                        rewritten_source = ast.unparse(tree)
-                        linecache.cache[upper_filename] = (
-                            len(rewritten_source),
-                            None,
-                            rewritten_source.splitlines(True),
-                            upper_filename,
-                        )
+                        if triggered:
+                            rewritten_source = ast.unparse(tree)
+                            linecache.cache[upper_filename] = (
+                                len(rewritten_source),
+                                None,
+                                rewritten_source.splitlines(True),
+                                upper_filename,
+                            )
+                        else:
+                            # No rewrite: executed code equals original source
+                            linecache.cache[upper_filename] = (
+                                len(source),
+                                None,
+                                source.splitlines(True),
+                                upper_filename,
+                            )
                     raise
             elif upper_spec.loader and isinstance(upper_spec.loader, InspectLoader):
                 # Fall back to compiled code if source is not available
