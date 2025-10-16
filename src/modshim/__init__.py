@@ -31,31 +31,47 @@ if os.getenv("MODSHIM_DEBUG"):
 
 
 class _ModuleReferenceRewriter(ast.NodeTransformer):
-    """AST transformer that rewrites module references based on a set of rules."""
+    """AST transformer that rewrites module references based on a set of rules.
+
+    Tracks which rewrite rules were triggered during transformation via
+    the 'triggered' set of rule indices.
+    """
 
     rules: list[tuple[str, str]]
-    dirty: bool = False
+    triggered: set[int]
 
-    def _rewrite_name(self, name: str) -> str:
-        """Apply all rewrite rules sequentially to a module name."""
+    def __init__(self) -> None:
+        super().__init__()
+        self.triggered = set()
+
+    def _rewrite_name_and_track(self, name: str) -> tuple[str, set[int]]:
+        """Apply all rewrite rules sequentially to a module name and track triggers.
+
+        Returns a tuple of:
+        - the rewritten module name (or the original if unchanged)
+        - a set of rule indices that were applied
+        """
         current_name = name
-        for search, replace in self.rules:
+        local_triggers: set[int] = set()
+        for i, (search, replace) in enumerate(self.rules):
             if current_name == search:
                 current_name = replace
+                local_triggers.add(i)
             elif current_name.startswith(f"{search}."):
                 suffix = current_name[len(search) :]
                 current_name = f"{replace}{suffix}"
-        return current_name
+                local_triggers.add(i)
+        return current_name, local_triggers
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.ImportFrom:
         """Rewrite 'from X import Y' statements."""
         if not node.module:
             return node
 
-        new_name = self._rewrite_name(node.module)
+        new_name, triggers = self._rewrite_name_and_track(node.module)
 
         if new_name != node.module:
-            self.dirty = True
+            self.triggered |= triggers
             return ast.ImportFrom(module=new_name, names=node.names, level=node.level)
         return node
 
@@ -65,16 +81,16 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
         made_change = False
         for alias in node.names:
             original_name = alias.name
-            new_name = self._rewrite_name(original_name)
+            new_name, triggers = self._rewrite_name_and_track(original_name)
 
             if new_name != original_name:
                 made_change = True
+                self.triggered |= triggers
                 new_names.append(ast.alias(name=new_name, asname=alias.asname))
             else:
                 new_names.append(alias)
 
         if made_change:
-            self.dirty = True
             return ast.Import(names=new_names)
 
         return node
@@ -86,10 +102,10 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
         # Check if this is a reference to the original module
         if isinstance(node.value, ast.Name):
             original_name = node.value.id
-            new_name = self._rewrite_name(original_name)
+            new_name, triggers = self._rewrite_name_and_track(original_name)
 
             if new_name != original_name:
-                self.dirty = True
+                self.triggered |= triggers
 
                 # Create a proper attribute access chain from the replacement string.
                 # This prevents creating an invalid ast.Name with dots in it.
@@ -256,7 +272,7 @@ class ModShimLoader(Loader):
 
     def rewrite_module_code(
         self, code: str, rules: list[tuple[str, str]]
-    ) -> tuple[ast.AST, bool]:
+    ) -> tuple[ast.AST, set[int]]:
         """Rewrite imports and module references in module code.
 
         Args:
@@ -264,15 +280,17 @@ class ModShimLoader(Loader):
             rules: A list of (search, replace) tuples
 
         Returns:
-            Tuple of the rewritten ast.AST and a bool signifying if any
-                modifications have been made
+            Tuple of:
+                - the rewritten ast.AST
+                - a set of rule indices that were triggered during rewriting
+                  (truthy when any changes occurred; can be used as a binary flag)
         """
         tree = ast.parse(code)
         transformer = reference_rewrite_factory(rules)()
         new_tree = transformer.visit(tree)
-        if not transformer.dirty:
-            return tree, False
-        return new_tree, True
+        if not transformer.triggered:
+            return tree, set()
+        return new_tree, set(transformer.triggered)
 
     def _get_cached_code(self, spec: ModuleSpec) -> CodeType | None:
         """Get cached compiled code if it exists and is valid."""
