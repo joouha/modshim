@@ -205,7 +205,7 @@ class ModShimLoader(Loader):
     # Track module that have already been created
     cache: ClassVar[dict[tuple[str, str], ModuleType]] = {}
     # Store magic number at class level
-    _magic_number = (1234).to_bytes(2, "little") + b"\r\n"
+    _magic_number = (1235).to_bytes(2, "little") + b"\r\n"
 
     # Track modules that are currently being processed to detect circular shimming
     _processing: ClassVar[set[ModuleType]] = set()
@@ -292,12 +292,21 @@ class ModShimLoader(Loader):
             return tree, set()
         return new_tree, set(transformer.triggered)
 
-    def _get_cached_code(self, spec: ModuleSpec) -> CodeType | None:
-        """Get cached compiled code if it exists and is valid."""
+    def _get_cached_code(self, spec: ModuleSpec) -> tuple[CodeType | None, bool, bool]:
+        """Get cached compiled code if it exists and is valid.
+
+        Returns:
+            (code_obj, no_rewrite_flag, working_needed_flag)
+            - code_obj: A code object if a rewritten version was cached; otherwise None.
+            - no_rewrite_flag: True if the cache indicates the module can be used as-is
+              without rewriting (in this case the cache does not contain a code object).
+            - working_needed_flag: True if the cache indicates a working module is needed
+              when executing the upper module; False otherwise. Defaults to False if not present.
+        """
         origin = spec.origin
         upper_origin = self.upper_root_origin
         if not origin or origin.startswith("<") or not upper_origin:
-            return None
+            return None, False, True
 
         # Create cache filename that includes the mount point to avoid conflicts
         cache_path = get_cache_path(
@@ -306,28 +315,40 @@ class ModShimLoader(Loader):
             original_module_name=spec.name,
         )
         if not os.path.exists(cache_path):
-            return None
+            return None, False, True
 
         try:
             source_stat = os.stat(origin)
         except OSError:
-            return None
+            return None, False, True
 
         # Check if cache exists and is newer than source
         if os.stat(cache_path).st_mtime <= source_stat.st_mtime:
-            return None
+            return None, False, True
 
         # Read and validate cache
         with open(cache_path, "rb") as f:
             # Read magic number and timestamp
             magic = f.read(4)
             if magic != self._magic_number:
-                return None
+                return None, False, True
 
             cached_mtime_bytes = f.read(4)
             cached_size_bytes = f.read(4)
             if len(cached_mtime_bytes) != 4 or len(cached_size_bytes) != 4:
-                return None
+                return None, False, True
+
+            # Read "no rewrite needed" flag (1 byte; 0 = rewrite performed, 1 = no rewrite)
+            flag_bytes = f.read(1)
+            if len(flag_bytes) != 1:
+                return None, False, True
+            no_rewrite = flag_bytes != b"\x00"
+
+            # Read "working module needed" flag (1 byte; 0 = not needed, 1 = needed).
+            flag_bytes = f.read(1)
+            if len(flag_bytes) != 1:
+                return None, False, True
+            working_needed = flag_bytes != b"\x00"
 
             source_mtime = int(source_stat.st_mtime)
             source_size = source_stat.st_size
@@ -336,13 +357,34 @@ class ModShimLoader(Loader):
             ) or int.from_bytes(cached_size_bytes, "little") != (
                 source_size & 0xFFFFFFFF
             ):
-                return None
+                return None, False, True
 
-            # Load code object
-            return marshal.load(f)  # noqa: S302
+            # If no rewrite was necessary, no code object is stored; return the flags only.
+            if no_rewrite:
+                return None, True, working_needed
 
-    def _cache_code(self, spec: ModuleSpec, code_obj: CodeType) -> None:
-        """Cache compiled code to disk."""
+            # Load code object for rewritten module
+            code_obj = marshal.load(f)  # noqa: S302
+            return code_obj, False, working_needed
+
+    def _cache_code(
+        self,
+        spec: ModuleSpec,
+        code_obj: CodeType,
+        no_rewrite: bool,
+        working_needed: bool,
+    ) -> None:
+        """Cache compiled code to disk.
+
+        The cache header layout:
+            - 4 bytes: magic number
+            - 4 bytes: source mtime (low 32 bits)
+            - 4 bytes: source size (low 32 bits)
+            - 1 byte : no_rewrite flag (0x00 = rewritten; 0x01 = can use as-is)
+            - 1 byte : working_needed flag (0x00 = not needed; 0x01 = needed)
+            - if no_rewrite == False: marshalled code object
+              (no code object is written when no_rewrite == True)
+        """
         origin = spec.origin
         upper_origin = self.upper_root_origin
 
@@ -375,9 +417,12 @@ class ModShimLoader(Loader):
                 f.write(self._magic_number)
                 f.write((source_mtime & 0xFFFFFFFF).to_bytes(4, "little"))
                 f.write((source_size & 0xFFFFFFFF).to_bytes(4, "little"))
-
-                # Write code object
-                marshal.dump(code_obj, f)
+                # Write flags
+                f.write(b"\x01" if no_rewrite else b"\x00")  # no_rewrite
+                f.write(b"\x01" if working_needed else b"\x00")  # working_needed
+                # Only write a code object if a rewrite occurred
+                if not no_rewrite:
+                    marshal.dump(code_obj, f)
         except OSError:
             # Ignore cache write failures
             pass
@@ -396,29 +441,96 @@ class ModShimLoader(Loader):
         lower_name = module.__name__.replace(self.mount_root, self.lower_root)
         upper_name = module.__name__.replace(self.mount_root, self.upper_root)
 
+        # Execute lower module first
         if lower_spec := self.lower_spec:
             lower_filename = f"modshim://{module.__file__}::{lower_spec.origin}"
 
             # Try to get cached code first
-            code_obj = None
+            code_obj: CodeType | None = None
+            no_rewrite = False
             if lower_spec.origin:
-                code_obj = self._get_cached_code(lower_spec)
+                code_obj, no_rewrite, _working_needed = self._get_cached_code(
+                    lower_spec
+                )
 
             if code_obj is None:
-                source = get_module_source(lower_name, lower_spec)
-                if source is not None:
-                    # Rewrite the source to get an AST
-                    tree, was_rewritten = self.rewrite_module_code(
-                        source, [(self.lower_root, self.mount_root)]
-                    )
-                    if was_rewritten:
-                        ast.fix_missing_locations(tree)
+                # If cache indicates no rewrite needed, prefer native bytecode and skip AST work
+                if (
+                    no_rewrite
+                    and lower_spec.loader
+                    and isinstance(lower_spec.loader, InspectLoader)
+                ):
+                    try:
+                        native_code = lower_spec.loader.get_code(lower_name)
+                    except (ImportError, AttributeError):
+                        native_code = None
+                    if native_code:
+                        code_obj = native_code
 
-                    # Compile the AST object directly
-                    code_obj = compile(cast("ast.Module", tree), lower_filename, "exec")
-
-                    if lower_spec.origin:
-                        self._cache_code(lower_spec, code_obj)
+                if code_obj is None:
+                    source = get_module_source(lower_name, lower_spec)
+                    if source is not None:
+                        # Rewrite the source to get an AST
+                        tree, was_rewritten = self.rewrite_module_code(
+                            source, [(self.lower_root, self.mount_root)]
+                        )
+                        if was_rewritten:
+                            # Changes were made: fix locations, compile, and cache (no_rewrite=False)
+                            ast.fix_missing_locations(tree)
+                            code_obj = compile(
+                                cast("ast.Module", tree), lower_filename, "exec"
+                            )
+                            if lower_spec.origin:
+                                self._cache_code(
+                                    lower_spec,
+                                    code_obj,
+                                    no_rewrite=False,
+                                    working_needed=False,
+                                )
+                        else:
+                            # No rewrite required: prefer loader.get_code over compiling parsed AST
+                            if lower_spec.loader and isinstance(
+                                lower_spec.loader, InspectLoader
+                            ):
+                                try:
+                                    native_code = lower_spec.loader.get_code(lower_name)
+                                except (ImportError, AttributeError):
+                                    native_code = None
+                                if native_code:
+                                    code_obj = native_code
+                                    if lower_spec.origin:
+                                        # Store header only; do not write code object
+                                        self._cache_code(
+                                            lower_spec,
+                                            code_obj,
+                                            no_rewrite=True,
+                                            working_needed=False,
+                                        )
+                            # If loader.get_code not available, fall back to compiling original AST
+                            if code_obj is None:
+                                code_obj = compile(
+                                    cast("ast.Module", tree), lower_filename, "exec"
+                                )
+                                if lower_spec.origin:
+                                    # Cache header with no_rewrite=True (no code object written)
+                                    self._cache_code(
+                                        lower_spec,
+                                        code_obj,
+                                        no_rewrite=True,
+                                        working_needed=False,
+                                    )
+                    # If source isn't available, fall back to executing the lower module natively
+                    if code_obj is None and lower_spec.loader:
+                        lower_module = module_from_spec(lower_spec)
+                        lower_spec.loader.exec_module(lower_module)
+                        # Copy attributes
+                        module.__dict__.update(
+                            {
+                                k: v
+                                for k, v in lower_module.__dict__.items()
+                                if not k.startswith("__")
+                            }
+                        )
 
             if code_obj is not None:
                 try:
@@ -441,64 +553,125 @@ class ModShimLoader(Loader):
                             lower_filename,
                         )
                     raise
-
-            # If all else fails, execute the lower module natively then copy its attributes
-            elif lower_spec.loader:
-                lower_module = module_from_spec(lower_spec)
-                lower_spec.loader.exec_module(lower_module)
-                # Copy attributes
-                module.__dict__.update(
-                    {
-                        k: v
-                        for k, v in lower_module.__dict__.items()
-                        if not k.startswith("__")
-                    }
-                )
         else:
             log.debug("No lower spec to execute")
 
         # Load and execute upper module
         if upper_spec := self.upper_spec:
-            # Generate name of working module
+            # Prepare working module name
             parts = module.__name__.split(".")
             working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
-            # Create a working copy of the module's state after executing the lower module
-            working_module = ModuleType(working_name)
-            working_module.__name__ = working_name
-            working_module.__file__ = getattr(module, "__file__", None)
-            working_module.__package__ = getattr(module, "__package__", None)
-            # Copy module state to working module
-            working_module.__dict__.update(module.__dict__)
-            # Register the modules in sys.modules
-            sys.modules[working_name] = working_module
 
             upper_filename = f"modshim://{module.__file__}::{upper_spec.origin}"
 
             # Try to get cached code first
             code_obj = None
+            no_rewrite = False
+            working_needed = False
             if upper_spec.origin:
-                code_obj = self._get_cached_code(upper_spec)
+                code_obj, no_rewrite, working_needed = self._get_cached_code(upper_spec)
 
             if code_obj is None:
-                source = get_module_source(upper_name, upper_spec)
-                if source is not None:
-                    # Perform combined AST transformations in one pass
-                    tree, dirty = self.rewrite_module_code(
-                        source,
-                        [
-                            (self.lower_root, self.mount_root),
-                            (module.__name__, working_name),
-                        ],
-                    )
+                # If cache indicates no rewrite needed, prefer native bytecode and skip AST work
+                if (
+                    no_rewrite
+                    and upper_spec.loader
+                    and isinstance(upper_spec.loader, InspectLoader)
+                ):
+                    try:
+                        native_code = upper_spec.loader.get_code(upper_name)
+                    except (ImportError, AttributeError):
+                        native_code = None
+                    if native_code:
+                        code_obj = native_code
+                        # No rewrite, so no working module is needed
 
-                    # If any changes were made, fix locations
-                    if dirty:
-                        ast.fix_missing_locations(tree)
+                if code_obj is None:
+                    source = get_module_source(upper_name, upper_spec)
+                    if source is not None:
+                        # Perform combined AST transformations in one pass
+                        tree, triggered = self.rewrite_module_code(
+                            source,
+                            [
+                                (self.lower_root, self.mount_root),
+                                (module.__name__, working_name),
+                            ],
+                        )
 
-                    code_obj = compile(cast("ast.Module", tree), upper_filename, "exec")
+                        # Decide if working module is needed: only if second rule triggered
+                        working_needed = 1 in triggered
 
-                    if upper_spec.origin:
-                        self._cache_code(upper_spec, code_obj)
+                        if triggered:
+                            # Rewriting occurred: fix locations and compile
+                            ast.fix_missing_locations(tree)
+                            code_obj = compile(
+                                cast("ast.Module", tree), upper_filename, "exec"
+                            )
+                            if upper_spec.origin:
+                                # Cache with "no rewrite" flag set to False (write code object)
+                                self._cache_code(
+                                    upper_spec,
+                                    code_obj,
+                                    no_rewrite=False,
+                                    working_needed=working_needed,
+                                )
+                        else:
+                            # No rewrite occurred: prefer loader.get_code and skip working module
+                            if upper_spec.loader and isinstance(
+                                upper_spec.loader, InspectLoader
+                            ):
+                                try:
+                                    native_code = upper_spec.loader.get_code(upper_name)
+                                except (ImportError, AttributeError):
+                                    native_code = None
+                                if native_code:
+                                    code_obj = native_code
+                                    if upper_spec.origin:
+                                        # Cache header only; do not write code object
+                                        self._cache_code(
+                                            upper_spec,
+                                            code_obj,
+                                            no_rewrite=True,
+                                            working_needed=False,
+                                        )
+                            # If loader.get_code not available, fall back to compiling parsed AST
+                            if code_obj is None:
+                                code_obj = compile(
+                                    cast("ast.Module", tree), upper_filename, "exec"
+                                )
+                                if upper_spec.origin:
+                                    # Cache header with no_rewrite=True (no code object written)
+                                    self._cache_code(
+                                        upper_spec,
+                                        code_obj,
+                                        no_rewrite=True,
+                                        working_needed=False,
+                                    )
+                    else:
+                        # Source not available; fall back to compiled code from loader
+                        if upper_spec.loader and isinstance(
+                            upper_spec.loader, InspectLoader
+                        ):
+                            try:
+                                upper_code = upper_spec.loader.get_code(upper_name)
+                            except (ImportError, AttributeError):
+                                upper_code = None
+                            if upper_code:
+                                code_obj = upper_code
+                                # No AST rewrite information; do not create working module
+                        # If still no code, do nothing further (handled by exception path below)
+
+            # Create working module only if needed
+            if working_needed:
+                # Generate name of working module and create from current module state
+                working_module = ModuleType(working_name)
+                working_module.__name__ = working_name
+                working_module.__file__ = getattr(module, "__file__", None)
+                working_module.__package__ = getattr(module, "__package__", None)
+                # Copy module state to working module
+                working_module.__dict__.update(module.__dict__)
+                # Register the modules in sys.modules
+                sys.modules[working_name] = working_module
 
             if code_obj is not None:
                 try:
@@ -511,7 +684,7 @@ class ModShimLoader(Loader):
                         import linecache
 
                         # Perform combined AST transformations to get the final AST, then unparse
-                        tree, dirty = self.rewrite_module_code(
+                        tree, _ = self.rewrite_module_code(
                             source,
                             [
                                 (self.lower_root, self.mount_root),
@@ -527,7 +700,6 @@ class ModShimLoader(Loader):
                             upper_filename,
                         )
                     raise
-
             elif upper_spec.loader and isinstance(upper_spec.loader, InspectLoader):
                 # Fall back to compiled code if source is not available
                 try:
