@@ -11,6 +11,7 @@ import logging
 import marshal
 import os
 import os.path
+import struct
 import sys
 import threading
 from importlib import import_module
@@ -330,6 +331,26 @@ class ModShimLoader(Loader):
             # Unset the internal call flag
             finder._internal_call.active = False
 
+        # Precompute cache directory, tag, optimization suffix, and negative cache
+        self._cache_dir: str | None = None
+        self._cache_tag: str | None = None
+        self._opt_suffix: str = ""
+        self._neg_cache: dict[str, tuple[int, int]] = {}
+        self._cache_lock = threading.Lock()
+
+        if self.upper_root_origin:
+            upper_path, _ = os.path.split(self.upper_root_origin)
+            self._cache_dir = os.path.join(upper_path, "__modshim__")
+
+        tag = sys.implementation.cache_tag
+        if tag is not None:
+            self._cache_tag = tag
+            opt_str = str(sys.flags.optimize if sys.flags.optimize != 0 else "")
+            if opt_str:
+                if not opt_str.isalnum():
+                    raise ValueError(f"{opt_str!r} is not alphanumeric")
+                self._opt_suffix = f"._OPT{opt_str}"
+
     def create_module(self, spec: ModuleSpec) -> ModuleType:
         """Create a new module object."""
         key = spec.name, self.mount_root
@@ -382,6 +403,17 @@ class ModShimLoader(Loader):
             return tree, set()
         return new_tree, set(transformer.triggered)
 
+    def _cache_path_for(self, original_module_name: str) -> str | None:
+        """Fast internal cache path builder to avoid repeated work in get_cache_path."""
+        if not self._cache_dir:
+            return None
+        if not self._cache_tag:
+            # Match prior behavior (get_cache_path would raise)
+            raise NotImplementedError("sys.implementation.cache_tag is None")
+        base_filename = f"{self.mount_root}.{original_module_name}"
+        stem = f"{base_filename}.{self._cache_tag}{self._opt_suffix}"
+        return os.path.join(self._cache_dir, f"{stem}.pyc")
+
     def _get_cached_code(self, spec: ModuleSpec) -> tuple[CodeType | None, bool, bool]:
         """Get cached compiled code if it exists and is valid.
 
@@ -391,71 +423,82 @@ class ModShimLoader(Loader):
             - no_rewrite_flag: True if the cache indicates the module can be used as-is
               without rewriting (in this case the cache does not contain a code object).
             - working_needed_flag: True if the cache indicates a working module is needed
-              when executing the upper module; False otherwise. Defaults to False if not present.
+              when executing the upper module; defaults to True on any failure to read or
+              validate the cache header (conservative behavior).
         """
         origin = spec.origin
         upper_origin = self.upper_root_origin
         if not origin or origin.startswith("<") or not upper_origin:
             return None, False, True
 
-        # Create cache filename that includes the mount point to avoid conflicts
-        cache_path = get_cache_path(
-            upper_file_path=upper_origin,
-            mount_root=self.mount_root,
-            original_module_name=spec.name,
-        )
-        if not os.path.exists(cache_path):
+        # Use fast, precomputed cache path
+        try:
+            cache_path = self._cache_path_for(spec.name)
+        except NotImplementedError:
+            # Match previous behavior when cache_tag is None
+            raise
+        if cache_path is None:
             return None, False, True
 
+        # Stat source file to get current mtime/size
         try:
             source_stat = os.stat(origin)
         except OSError:
             return None, False, True
+        source_mtime32 = int(source_stat.st_mtime_ns) & 0xFFFFFFFF
+        source_size32 = source_stat.st_size & 0xFFFFFFFF
 
-        # Check if cache exists and is newer than source
-        if os.stat(cache_path).st_mtime <= source_stat.st_mtime:
+        # Fast negative cache: avoid repeated disk hits when the cache file is missing
+        with self._cache_lock:
+            neg = self._neg_cache.get(cache_path)
+            if neg == (source_mtime32, source_size32):
+                return None, False, True
+
+        # Single stat call to check existence and freshness (remove redundant exists check)
+        try:
+            cache_stat = os.stat(cache_path)
+        except OSError:
+            with self._cache_lock:
+                self._neg_cache[cache_path] = (source_mtime32, source_size32)
             return None, False, True
 
-        # Read and validate cache
-        with open(cache_path, "rb") as f:
-            # Read magic number and timestamp
-            magic = f.read(4)
-            if magic != self._magic_number:
-                return None, False, True
+        # Cache file exists: clear any negative cache entry
+        with self._cache_lock:
+            self._neg_cache.pop(cache_path, None)
 
-            cached_mtime_bytes = f.read(4)
-            cached_size_bytes = f.read(4)
-            if len(cached_mtime_bytes) != 4 or len(cached_size_bytes) != 4:
-                return None, False, True
+        # Check if cache is newer than source using nanosecond resolution
+        if int(cache_stat.st_mtime_ns) <= int(source_stat.st_mtime_ns):
+            return None, False, True
 
-            # Read "no rewrite needed" flag (1 byte; 0 = rewrite performed, 1 = no rewrite)
-            flag_bytes = f.read(1)
-            if len(flag_bytes) != 1:
-                return None, False, True
-            no_rewrite = flag_bytes != b"\x00"
+        # Read and parse cache header in one shot for performance
+        try:
+            with open(cache_path, "rb") as f:
+                header = f.read(14)
+                if len(header) != 14:
+                    return None, False, True
+                magic, cached_mtime32, cached_size32, no_rewrite_flag, working_flag = (
+                    struct.unpack("<4sIIBB", header)
+                )
+                if magic != self._magic_number:
+                    return None, False, True
 
-            # Read "working module needed" flag (1 byte; 0 = not needed, 1 = needed).
-            flag_bytes = f.read(1)
-            if len(flag_bytes) != 1:
-                return None, False, True
-            working_needed = flag_bytes != b"\x00"
+                if (cached_mtime32 != source_mtime32) or (
+                    cached_size32 != source_size32
+                ):
+                    return None, False, True
 
-            source_mtime = int(source_stat.st_mtime)
-            source_size = source_stat.st_size
-            if int.from_bytes(cached_mtime_bytes, "little") != (
-                source_mtime & 0xFFFFFFFF
-            ) or int.from_bytes(cached_size_bytes, "little") != (
-                source_size & 0xFFFFFFFF
-            ):
-                return None, False, True
+                no_rewrite = no_rewrite_flag != 0
+                working_needed = working_flag != 0
 
-            # If no rewrite was necessary, no code object is stored; return the flags only.
-            if no_rewrite:
-                return None, True, working_needed
+                # If no rewrite was necessary, no code object is stored; return flags only
+                if no_rewrite:
+                    return None, True, working_needed
 
-            # Load code object for rewritten module
-            code_obj = marshal.load(f)  # noqa: S302
-            return code_obj, False, working_needed
+                # Load code object for rewritten module
+                code_obj = marshal.load(f)  # noqa: S302
+                return code_obj, False, working_needed
+        except OSError:
+            return None, False, True
 
     def _cache_code(
         self,
@@ -468,7 +511,7 @@ class ModShimLoader(Loader):
 
         The cache header layout:
             - 4 bytes: magic number
-            - 4 bytes: source mtime (low 32 bits)
+            - 4 bytes: source mtime (low 32 bits, from st_mtime_ns)
             - 4 bytes: source size (low 32 bits)
             - 1 byte : no_rewrite flag (0x00 = rewritten; 0x01 = can use as-is)
             - 1 byte : working_needed flag (0x00 = not needed; 0x01 = needed)
@@ -487,15 +530,18 @@ class ModShimLoader(Loader):
             # Cannot get source stats, so cannot cache.
             return
 
-        source_mtime = int(source_stat.st_mtime)
-        source_size = source_stat.st_size
+        source_mtime32 = int(source_stat.st_mtime_ns) & 0xFFFFFFFF
+        source_size32 = source_stat.st_size & 0xFFFFFFFF
 
-        # Get cache path
-        cache_path = get_cache_path(
-            upper_file_path=upper_origin,
-            mount_root=self.mount_root,
-            original_module_name=spec.name,
-        )
+        # Use fast, precomputed cache path
+        try:
+            cache_path = self._cache_path_for(spec.name)
+        except NotImplementedError:
+            # Match previous behavior when cache_tag is None
+            return None
+        if cache_path is None:
+            return None
+
         # Ensure cache directory exists
         cache_path_parent, _ = os.path.split(cache_path)
         os.makedirs(cache_path_parent, exist_ok=True)
@@ -505,8 +551,8 @@ class ModShimLoader(Loader):
             with open(cache_path, "wb") as f:
                 # Write magic number and timestamp/size
                 f.write(self._magic_number)
-                f.write((source_mtime & 0xFFFFFFFF).to_bytes(4, "little"))
-                f.write((source_size & 0xFFFFFFFF).to_bytes(4, "little"))
+                f.write(source_mtime32.to_bytes(4, "little"))
+                f.write(source_size32.to_bytes(4, "little"))
                 # Write flags
                 f.write(b"\x01" if no_rewrite else b"\x00")  # no_rewrite
                 f.write(b"\x01" if working_needed else b"\x00")  # working_needed
@@ -516,6 +562,10 @@ class ModShimLoader(Loader):
         except OSError:
             # Ignore cache write failures
             pass
+
+        # Clear any negative cache for this path (the file now exists)
+        with self._cache_lock:
+            self._neg_cache.pop(cache_path, None)
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by combining upper and lower modules."""
