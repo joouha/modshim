@@ -55,6 +55,16 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
         idx = name.find(".")
         return name if idx == -1 else name[:idx]
 
+    @staticmethod
+    def _copy_loc(dst: ast.AST, src: ast.AST) -> ast.AST:
+        """Copy source location from src to dst, including end positions when available."""
+        dst = ast.copy_location(dst, src)
+        if hasattr(src, "end_lineno"):
+            dst.end_lineno = src.end_lineno
+        if hasattr(src, "end_col_offset"):
+            dst.end_col_offset = src.end_col_offset
+        return dst
+
     def _apply_one_rule(self, name: str) -> tuple[str, int | None]:
         """Apply at most one matching rule to 'name'.
 
@@ -115,7 +125,12 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
 
         if new_name != node.module:
             self.triggered |= triggers
-            return ast.ImportFrom(module=new_name, names=node.names, level=node.level)
+            new_node = ast.ImportFrom(
+                module=new_name, names=node.names, level=node.level
+            )
+            new_node = self._copy_loc(new_node, node)
+            new_node = ast.fix_missing_locations(new_node)
+            return new_node
         return node
 
     def visit_Import(self, node: ast.Import) -> ast.Import:
@@ -132,12 +147,21 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
             if new_name != original_name:
                 made_change = True
                 self.triggered |= triggers
-                new_names.append(ast.alias(name=new_name, asname=alias.asname))
+                new_alias = ast.alias(name=new_name, asname=alias.asname)
+                # Copy location from the original alias to the new alias
+                try:
+                    new_alias = self._copy_loc(new_alias, alias)
+                except Exception:
+                    pass
+                new_names.append(new_alias)
             else:
                 new_names.append(alias)
 
         if made_change:
-            return ast.Import(names=new_names)
+            new_node = ast.Import(names=new_names)
+            new_node = self._copy_loc(new_node, node)
+            new_node = ast.fix_missing_locations(new_node)
+            return new_node
 
         return node
 
@@ -158,19 +182,23 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
                 # Create a proper attribute access chain from the replacement string.
                 # This prevents creating an invalid ast.Name with dots in it.
                 parts = new_name.split(".")
-                # Start with the first part as a Name node
+                # Start with the first part as a Name node, copying location from the original base
                 new_value: ast.expr = ast.Name(id=parts[0], ctx=node.value.ctx)
-                # Chain the rest as Attribute nodes
+                new_value = self._copy_loc(new_value, node.value)
+                # Chain the rest as Attribute nodes; copy base location for each chained node
                 for part in parts[1:]:
-                    new_value = ast.Attribute(
-                        value=new_value, attr=part, ctx=ast.Load()
-                    )
+                    chained = ast.Attribute(value=new_value, attr=part, ctx=ast.Load())
+                    chained = self._copy_loc(chained, node.value)
+                    new_value = chained
 
-                return ast.Attribute(
+                new_attr = ast.Attribute(
                     value=new_value,
                     attr=node.attr,
                     ctx=node.ctx,
                 )
+                new_attr = self._copy_loc(new_attr, node)
+                new_attr = ast.fix_missing_locations(new_attr)
+                return new_attr
             # If no rewrite on a simple Name base, we can return early
             return node
 
@@ -653,8 +681,7 @@ class ModShimLoader(Loader):
                                 source, rules
                             )
                             if was_rewritten:
-                                # Changes were made: fix locations, compile, and cache (no_rewrite=False)
-                                ast.fix_missing_locations(tree)
+                                # Changes were made: compile and cache (no_rewrite=False)
                                 code_obj = compile(
                                     cast("ast.Module", tree),
                                     lower_filename,
@@ -836,8 +863,7 @@ class ModShimLoader(Loader):
                             working_needed = 1 in triggered
 
                             if triggered:
-                                # Rewriting occurred: fix locations and compile
-                                ast.fix_missing_locations(tree)
+                                # Rewriting occurred: compile
                                 code_obj = compile(
                                     cast("ast.Module", tree),
                                     upper_filename,
