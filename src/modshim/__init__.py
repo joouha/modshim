@@ -37,35 +37,77 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
     the 'triggered' set of rule indices.
     """
 
-    rules: list[tuple[str, str]]
+    # Supplied rules (search, replace)
+    rules: ClassVar[list[tuple[str, str]]]
+    # Precomputed lookup structures for faster matching
+    _exact_rules: ClassVar[dict[str, tuple[int, str]]]
+    _prefix_rules_by_first: ClassVar[dict[str, list[tuple[int, str, str]]]]
+    # Trigger indices that fired during a visit
     triggered: set[int]
 
     def __init__(self) -> None:
         super().__init__()
         self.triggered = set()
 
+    @staticmethod
+    def _first_component(name: str) -> str:
+        idx = name.find(".")
+        return name if idx == -1 else name[:idx]
+
+    def _apply_one_rule(self, name: str) -> tuple[str, int | None]:
+        """Apply at most one matching rule to 'name'.
+
+        Returns:
+            (new_name, rule_index or None if no rule applied)
+        """
+        # Exact match first (O(1))
+        exact = self._exact_rules.get(name)
+        if exact is not None:
+            idx, replace = exact
+            return replace, idx
+
+        # Prefix match only if there is a dot and the first component matches candidates
+        if "." in name:
+            first = self._first_component(name)
+            for idx, search, replace in self._prefix_rules_by_first.get(first, ()):
+                # search is guaranteed to have the same first component by construction
+                if name.startswith(f"{search}."):
+                    return f"{replace}{name[len(search) :]}", idx
+
+        return name, None
+
     def _rewrite_name_and_track(self, name: str) -> tuple[str, set[int]]:
-        """Apply all rewrite rules sequentially to a module name and track triggers.
+        """Apply rewrite rules sequentially to a module name and track triggers.
+
+        Unlike a single-pass/first-hit approach, this method allows chained rewrites
+        (e.g., 'json' -> 'json_metadata' -> '_working_json_metadata') which are required
+        for correct behavior when both lower->mount and mount->working rewrites are in play.
 
         Returns a tuple of:
         - the rewritten module name (or the original if unchanged)
-        - a set of rule indices that were applied
+        - a set containing indices of the applied rules (empty if none)
         """
-        current_name = name
-        local_triggers: set[int] = set()
-        for i, (search, replace) in enumerate(self.rules):
-            if current_name == search:
-                current_name = replace
-                local_triggers.add(i)
-            elif current_name.startswith(f"{search}."):
-                suffix = current_name[len(search) :]
-                current_name = f"{replace}{suffix}"
-                local_triggers.add(i)
-        return current_name, local_triggers
+        # Fast path: no rules configured for this transformer
+        if not self.rules:
+            return name, set()
+
+        current = name
+        fired: set[int] = set()
+
+        # Apply up to len(rules) chained rewrites to avoid accidental cycles.
+        # In normal usage we need at most two steps.
+        max_steps = max(1, len(self.rules))
+        for _ in range(max_steps):
+            new_name, idx = self._apply_one_rule(current)
+            if idx is None or new_name == current:
+                break
+            fired.add(idx)
+            current = new_name
+        return current, fired
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> ast.ImportFrom:
         """Rewrite 'from X import Y' statements."""
-        if not node.module:
+        if not self.rules or not node.module:
             return node
 
         new_name, triggers = self._rewrite_name_and_track(node.module)
@@ -77,6 +119,9 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
 
     def visit_Import(self, node: ast.Import) -> ast.Import:
         """Rewrite 'import X' statements."""
+        if not self.rules:
+            return node
+
         new_names: list[ast.alias] = []
         made_change = False
         for alias in node.names:
@@ -97,9 +142,11 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
 
     def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
         """Rewrite module references like 'urllib.response' to 'urllib_punycode.response'."""
-        node = cast("ast.Attribute", self.generic_visit(node))
+        # Fast path when there are no rules
+        if not self.rules:
+            return node
 
-        # Check if this is a reference to the original module
+        # Try to rewrite without walking children when value is a simple Name
         if isinstance(node.value, ast.Name):
             original_name = node.value.id
             new_name, triggers = self._rewrite_name_and_track(original_name)
@@ -123,18 +170,38 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
                     attr=node.attr,
                     ctx=node.ctx,
                 )
+            # If no rewrite on a simple Name base, we can return early
+            return node
 
+        # Otherwise visit children normally and attempt rewrites in deeper attributes
+        node = cast("ast.Attribute", self.generic_visit(node))
         return node
 
 
 def reference_rewrite_factory(
     rules: list[tuple[str, str]],
 ) -> type[_ModuleReferenceRewriter]:
-    """Get an AST module reference rewriter."""
+    """Get an AST module reference rewriter with precomputed fast lookups."""
 
-    class ReferenceRewriter(_ModuleReferenceRewriter): ...
+    class ReferenceRewriter(_ModuleReferenceRewriter):
+        pass
 
+    # Assign rules and precompute structures for fast matching
     ReferenceRewriter.rules = rules
+
+    # Build exact match dict and prefix lists grouped by first token
+    exact: dict[str, tuple[int, str]] = {}
+    prefix_by_first: dict[str, list[tuple[int, str, str]]] = {}
+    for i, (search, replace) in enumerate(rules):
+        # Exact mapping for equality checks
+        exact[search] = (i, replace)
+        # Group prefix rules by first component to filter candidates cheaply
+        first = search.split(".", 1)[0]
+        prefix_by_first.setdefault(first, []).append((i, search, replace))
+
+    ReferenceRewriter._exact_rules = exact
+    ReferenceRewriter._prefix_rules_by_first = prefix_by_first
+
     return ReferenceRewriter
 
 
@@ -300,6 +367,14 @@ class ModShimLoader(Loader):
                 - a set of rule indices that were triggered during rewriting
                   (truthy when any changes occurred; can be used as a binary flag)
         """
+        # Fast-path when there are no rules: return parsed AST without visiting
+        if not rules:
+            return ast.parse(code), set()
+
+        # If a preflight scan indicates no rewrite is needed, skip visiting
+        if not _preflight_needs_rewrite(code, rules):
+            return ast.parse(code), set()
+
         tree = ast.parse(code)
         transformer = reference_rewrite_factory(rules)()
         new_tree = transformer.visit(tree)
@@ -493,9 +568,7 @@ class ModShimLoader(Loader):
                                 lower_spec.loader, InspectLoader
                             ):
                                 try:
-                                    native_code = lower_spec.loader.get_code(
-                                        lower_name
-                                    )
+                                    native_code = lower_spec.loader.get_code(lower_name)
                                 except (ImportError, AttributeError):
                                     native_code = None
                                 if native_code:
