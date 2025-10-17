@@ -478,7 +478,10 @@ class ModShimLoader(Loader):
                             # Changes were made: fix locations, compile, and cache (no_rewrite=False)
                             ast.fix_missing_locations(tree)
                             code_obj = compile(
-                                cast("ast.Module", tree), lower_filename, "exec"
+                                cast("ast.Module", tree),
+                                lower_filename,
+                                "exec",
+                                optimize=sys.flags.optimize,
                             )
                             if lower_spec.origin:
                                 self._cache_code(
@@ -509,7 +512,10 @@ class ModShimLoader(Loader):
                             # If loader.get_code not available, fall back to compiling original AST
                             if code_obj is None:
                                 code_obj = compile(
-                                    cast("ast.Module", tree), lower_filename, "exec"
+                                    cast("ast.Module", tree),
+                                    lower_filename,
+                                    "exec",
+                                    optimize=sys.flags.optimize,
                                 )
                                 if lower_spec.origin:
                                     # Cache header with no_rewrite=True (no code object written)
@@ -616,7 +622,10 @@ class ModShimLoader(Loader):
                             # Rewriting occurred: fix locations and compile
                             ast.fix_missing_locations(tree)
                             code_obj = compile(
-                                cast("ast.Module", tree), upper_filename, "exec"
+                                cast("ast.Module", tree),
+                                upper_filename,
+                                "exec",
+                                optimize=sys.flags.optimize,
                             )
                             if upper_spec.origin:
                                 # Cache with "no rewrite" flag set to False (write code object)
@@ -648,7 +657,10 @@ class ModShimLoader(Loader):
                             # If loader.get_code not available, fall back to compiling parsed AST
                             if code_obj is None:
                                 code_obj = compile(
-                                    cast("ast.Module", tree), upper_filename, "exec"
+                                    cast("ast.Module", tree),
+                                    upper_filename,
+                                    "exec",
+                                    optimize=sys.flags.optimize,
                                 )
                                 if upper_spec.origin:
                                     # Cache header with no_rewrite=True (no code object written)
