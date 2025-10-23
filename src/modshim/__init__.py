@@ -7,7 +7,6 @@ that includes functionality from both. Internal imports are redirected to the mo
 from __future__ import annotations
 
 import ast
-import logging
 import marshal
 import os
 import os.path
@@ -25,10 +24,11 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 # Set up logger with NullHandler
-log = logging.getLogger(__name__)
-log.addHandler(logging.NullHandler())
-if os.getenv("MODSHIM_DEBUG"):
-    logging.basicConfig(level=logging.DEBUG)
+# import logging
+# log = logging.getLogger(__name__)
+# log.addHandler(logging.NullHandler())
+# if os.getenv("MODSHIM_DEBUG"):
+#     logging.basicConfig(level=logging.DEBUG)
 
 
 class _ModuleReferenceRewriter(ast.NodeTransformer):
@@ -383,7 +383,7 @@ class ModShimLoader(Loader):
         """Create a new module object."""
         key = spec.name, self.mount_root
         if key in self.cache:
-            log.debug("Returning cached module %r", spec.name)
+            # log.debug("Returning cached module %r", spec.name)
             return self.cache[key]
 
         module = ModuleType(spec.name)
@@ -597,7 +597,7 @@ class ModShimLoader(Loader):
 
     def exec_module(self, module: ModuleType) -> None:
         """Execute the module by combining upper and lower modules."""
-        log.debug("Exec_module called for %r", module.__name__)
+        # log.debug("Exec_module called for %r", module.__name__)
 
         # Check if we're in a circular shimming situation
         if module in self._processing:
@@ -747,7 +747,7 @@ class ModShimLoader(Loader):
 
             if code_obj is not None:
                 try:
-                    log.debug("Executing lower: %r", self.lower_spec.name)
+                    # log.debug("Executing lower: %r", self.lower_spec.name)
                     exec(code_obj, module.__dict__)  # noqa: S102
                 except:
                     # On error, generate source for linecache for better tracebacks.
@@ -777,8 +777,8 @@ class ModShimLoader(Loader):
                                 lower_filename,
                             )
                     raise
-        else:
-            log.debug("No lower spec to execute")
+        # else:
+        #     log.debug("No lower spec to execute")
 
         # Load and execute upper module
         if upper_spec := self.upper_spec:
@@ -943,7 +943,7 @@ class ModShimLoader(Loader):
 
             if code_obj is not None:
                 try:
-                    log.debug("Executing upper: %r", self.upper_spec.name)
+                    # log.debug("Executing upper: %r", self.upper_spec.name)
                     exec(code_obj, module.__dict__)  # noqa: S102
                 except:
                     # On error, generate source for linecache
@@ -986,13 +986,13 @@ class ModShimLoader(Loader):
 
                 except (ImportError, AttributeError):
                     pass
-        else:
-            log.debug("No upper spec to execute")
+        # else:
+        #     log.debug("No upper spec to execute")
 
         # Remove this module from processing set
         self._processing.discard(module)
 
-        log.debug("Exec_module completed for %r", module.__name__)
+        # log.debug("Exec_module completed for %r", module.__name__)
 
 
 class ModShimFinder(MetaPathFinder):
@@ -1023,7 +1023,7 @@ class ModShimFinder(MetaPathFinder):
         target: ModuleType | None = None,
     ) -> ModuleSpec | None:
         """Find a module spec for the given module name."""
-        log.debug("Find spec called for %r", fullname)
+        # log.debug("Find spec called for %r", fullname)
 
         # If this find_spec is called internally from _create_spec, ignore it
         # to allow standard finders to locate the original lower/upper modules.
@@ -1060,17 +1060,17 @@ class ModShimFinder(MetaPathFinder):
             # Find upper and lower specs using standard finders
             # (Our finder will ignore calls while _internal_call.active is True)
             try:
-                log.debug("Finding lower spec %r", lower_name)
+                # log.debug("Finding lower spec %r", lower_name)
                 lower_spec = find_spec(lower_name)
             except (ImportError, AttributeError):
                 lower_spec = None
-            log.debug("Found lower spec %r", lower_spec)
+            # log.debug("Found lower spec %r", lower_spec)
             try:
-                log.debug("Finding upper spec %r", upper_name)
+                # log.debug("Finding upper spec %r", upper_name)
                 upper_spec = find_spec(upper_name)
             except (ImportError, AttributeError):
                 upper_spec = None
-            log.debug("Found upper spec %r", upper_spec)
+            # log.debug("Found upper spec %r", upper_spec)
 
         finally:
             # Unset the internal call flag
