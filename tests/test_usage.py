@@ -205,7 +205,7 @@ def test_nonexistent_modules() -> None:
 
     # Attempt to import the non-existent module
     with pytest.raises(ImportError):
-        import nonexistent_mount  # type: ignore [reportMissingImports]
+        import nonexistent_mount as nonexistent_mount  # type: ignore [reportMissingImports]
 
     # Also test using __import__
     with pytest.raises(ImportError):
@@ -223,7 +223,9 @@ def test_import_error_on_nonexistent_submodule() -> None:
 
     # Attempt to import a non-existent submodule
     with pytest.raises(ImportError):
-        from json_import_error import non_existent_submodule  # type: ignore [reportMissingImports]
+        from json_import_error import (  # type: ignore [reportMissingImports]
+            non_existent_submodule as non_existent_submodule,
+        )
 
     # Also test using __import__
     with pytest.raises(ImportError):
