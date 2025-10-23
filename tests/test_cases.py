@@ -61,6 +61,34 @@ def test_circular_import_overmount() -> None:
     assert hasattr(tests.cases.circular_upper.layout.containers, "Container")
 
 
+def test_circular_import_overmount_lower() -> None:
+    """Test circular imports by mounting the shimmed module over the lower module.
+
+    This test verifies that circular dependencies can be resolved when the mount
+    point is the lower module itself.
+    """
+    shim(
+        "tests.cases.circular_lower",
+        "tests.cases.circular_upper",
+        "tests.cases.circular_lower",
+    )
+    try:
+        import tests.cases.circular_lower.layout  # pyright: ignore [reportMissingImports]
+
+        assert True
+    except ImportError as exc:
+        raise AssertionError(
+            "Import of `tests.cases.circular_lower.layout` failed"
+        ) from exc
+
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.circular_lower, ModuleType)
+    assert isinstance(tests.cases.circular_lower.layout, ModuleType)
+    assert isinstance(tests.cases.circular_lower.layout.containers, ModuleType)
+    assert hasattr(tests.cases.circular_lower.layout.containers, "Container")
+
+
 def test_circular_import_overmount_auto() -> None:
     """Test circular imports without explicit shimming.
 
@@ -163,6 +191,47 @@ def test_extras_import_overmount() -> None:
     assert isinstance(tests.cases.extras_upper, ModuleType)
     assert isinstance(tests.cases.extras_upper.extra, ModuleType)
     assert hasattr(tests.cases.extras_upper.extra, "y"), (
+        "Cannot access attribute in extra upper module"
+    )
+
+
+def test_extras_import_overmount_lower() -> None:
+    """Additional modules in upper are importable when mounting over the lower module."""
+    shim(
+        "tests.cases.extras_lower",
+        "tests.cases.extras_upper",
+        "tests.cases.extras_lower",
+    )
+
+    try:
+        import tests.cases.extras_lower.mod  # pyright: ignore [reportMissingImports]
+
+        assert True
+    except ImportError as exc:
+        raise AssertionError("Import of `tests.cases.extras_lower.mod` failed") from exc
+
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.extras_lower, ModuleType)
+    assert isinstance(tests.cases.extras_lower.mod, ModuleType)
+    assert hasattr(tests.cases.extras_lower.mod, "x"), (
+        "Cannot access attribute in lower module"
+    )
+
+    try:
+        import tests.cases.extras_lower.extra  # pyright: ignore [reportMissingImports]
+
+        assert True
+    except ImportError as exc:
+        raise AssertionError(
+            "Import of `tests.cases.extras_lower.extra` failed"
+        ) from exc
+
+    assert isinstance(tests, ModuleType)
+    assert isinstance(tests.cases, ModuleType)
+    assert isinstance(tests.cases.extras_lower, ModuleType)
+    assert isinstance(tests.cases.extras_lower.extra, ModuleType)
+    assert hasattr(tests.cases.extras_lower.extra, "y"), (
         "Cannot access attribute in extra upper module"
     )
 

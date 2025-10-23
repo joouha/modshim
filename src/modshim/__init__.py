@@ -167,6 +167,9 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
 
     def visit_Attribute(self, node: ast.Attribute) -> ast.AST:
         """Rewrite module references like 'urllib.response' to 'urllib_punycode.response'."""
+        # Recurse into children first, then apply the base-name rewrite when appropriate.
+        node = cast("ast.Attribute", self.generic_visit(node))
+
         # Fast path when there are no rules
         if not self.rules:
             return node
@@ -1114,11 +1117,11 @@ class ModShimFinder(MetaPathFinder):
             ]
 
         # Add lower module submodule search locations to fall back on
-        # if lower_spec and lower_spec.submodule_search_locations is not None:
-        #     spec.submodule_search_locations = [
-        #         *(spec.submodule_search_locations or []),
-        #         *list(lower_spec.submodule_search_locations),
-        #     ]
+        if lower_spec and lower_spec.submodule_search_locations is not None:
+            spec.submodule_search_locations = [
+                *(spec.submodule_search_locations or []),
+                *list(lower_spec.submodule_search_locations),
+            ]
         return spec
 
 
