@@ -149,10 +149,7 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
                 self.triggered |= triggers
                 new_alias = ast.alias(name=new_name, asname=alias.asname)
                 # Copy location from the original alias to the new alias
-                try:
-                    new_alias = self._copy_loc(new_alias, alias)
-                except Exception:
-                    pass
+                new_alias = self._copy_loc(new_alias, alias)
                 new_names.append(new_alias)
             else:
                 new_names.append(alias)
@@ -296,7 +293,7 @@ def get_cache_path(
 
 
 def _preflight_needs_rewrite(code: str, rules: list[tuple[str, str]]) -> bool:
-    """Simple and fast pre-flight check to avoid AST parsing when not needed.
+    """Avoid AST parsing when not needed with string-based-matching.
 
     Returns True if any search term in rules appears in the code in a way that
     suggests a rewrite might be necessary. Uses cheap substring checks only.
@@ -304,10 +301,7 @@ def _preflight_needs_rewrite(code: str, rules: list[tuple[str, str]]) -> bool:
     if not rules:
         return False
     # Check for exact names and dotted-prefix references
-    for search, _replace in rules:
-        if search in code or f"{search}." in code:
-            return True
-    return False
+    return any(search in code or f"{search}." in code for search, _replace in rules)
 
 
 class ModShimLoader(Loader):
