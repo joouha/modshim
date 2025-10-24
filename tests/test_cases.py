@@ -139,6 +139,9 @@ def test_extras_import() -> None:
     assert hasattr(tests.cases.extras_mount.mod, "x"), (
         "Cannot access attribute in lower module"
     )
+    assert hasattr(tests.cases.extras_mount.mod, "y"), (
+        "Cannot access attribute in lower module"
+    )
 
     try:
         import tests.cases.extras_mount.extra  # pyright: ignore [reportMissingImports]
@@ -153,7 +156,7 @@ def test_extras_import() -> None:
     assert isinstance(tests.cases, ModuleType)
     assert isinstance(tests.cases.extras_mount, ModuleType)
     assert isinstance(tests.cases.extras_mount.extra, ModuleType)
-    assert hasattr(tests.cases.extras_mount.extra, "y"), (
+    assert hasattr(tests.cases.extras_mount.extra, "z"), (
         "Cannot access attribute in extra upper module"
     )
 
@@ -194,7 +197,7 @@ def test_extras_import_overmount() -> None:
     assert isinstance(tests.cases, ModuleType)
     assert isinstance(tests.cases.extras_upper, ModuleType)
     assert isinstance(tests.cases.extras_upper.extra, ModuleType)
-    assert hasattr(tests.cases.extras_upper.extra, "y"), (
+    assert hasattr(tests.cases.extras_upper.extra, "z"), (
         "Cannot access attribute in extra upper module"
     )
 
@@ -221,6 +224,9 @@ def test_extras_import_overmount_lower() -> None:
     assert hasattr(tests.cases.extras_lower.mod, "x"), (
         "Cannot access attribute in lower module"
     )
+    assert hasattr(tests.cases.extras_lower.mod, "y"), (
+        "Cannot access attribute in lower module"
+    )
 
     try:
         import tests.cases.extras_lower.extra  # pyright: ignore [reportMissingImports]
@@ -235,7 +241,7 @@ def test_extras_import_overmount_lower() -> None:
     assert isinstance(tests.cases, ModuleType)
     assert isinstance(tests.cases.extras_lower, ModuleType)
     assert isinstance(tests.cases.extras_lower.extra, ModuleType)
-    assert hasattr(tests.cases.extras_lower.extra, "y"), (
+    assert hasattr(tests.cases.extras_lower.extra, "z"), (
         "Cannot access attribute in extra upper module"
     )
 
@@ -270,7 +276,7 @@ def test_extras_import_overmount_auto() -> None:
     assert isinstance(tests.cases, ModuleType)
     assert isinstance(tests.cases.extras_upper, ModuleType)
     assert isinstance(tests.cases.extras_upper.extra, ModuleType)
-    assert hasattr(tests.cases.extras_upper.extra, "y"), (
+    assert hasattr(tests.cases.extras_upper.extra, "z"), (
         "Cannot access attribute in extra upper module"
     )
 

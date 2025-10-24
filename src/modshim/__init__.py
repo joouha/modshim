@@ -955,6 +955,7 @@ class ModShimFinder(MetaPathFinder):
         loader = ModShimLoader(
             lower_spec, upper_spec, lower_root, upper_root, mount_root, finder=self
         )
+
         spec = ModuleSpec(
             name=fullname,
             loader=loader,
@@ -971,12 +972,17 @@ class ModShimFinder(MetaPathFinder):
                 *list(upper_spec.submodule_search_locations),
             ]
 
-        # Add lower module submodule search locations to fall back on
-        if lower_spec and lower_spec.submodule_search_locations is not None:
+        # Inject lower module submodule search locations if we have mounted over the lower
+        if (
+            lower_root == mount_root
+            and lower_spec
+            and lower_spec.submodule_search_locations is not None
+        ):
             spec.submodule_search_locations = [
-                *(spec.submodule_search_locations or []),
                 *list(lower_spec.submodule_search_locations),
+                *(spec.submodule_search_locations or []),
             ]
+
         return spec
 
 
