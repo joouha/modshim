@@ -1,6 +1,10 @@
 """Various example test cases for modshim."""
 
+import os
+import traceback
 from types import ModuleType
+
+import pytest
 
 from modshim import shim
 
@@ -385,3 +389,61 @@ def test_shim_call_at_end() -> None:
     assert hasattr(tests.cases.shim_call_ordering_upper_end.extra, "y")
     assert tests.cases.shim_call_ordering_upper_end.extra.y == 200
     assert tests.cases.shim_call_ordering_upper_end.some_var == "end"
+
+
+def test_stack_trace_lines_for_upper_import_error() -> None:
+    """Verify that tracebacks for errors in the upper module are correct."""
+    # Mount upper on lower
+    shim(
+        lower="tests.cases.tracebacks_lower",
+        upper="tests.cases.tracebacks_upper",
+        mount="mount_point",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        import mount_point.a as a  # pyright: ignore [reportMissingImports  # noqa: F401
+
+    # Inspect traceback frames
+    frames = traceback.extract_tb(excinfo.value.__traceback__)
+    # Find the frame that corresponds to the upper module (should be the raising line)
+    target = None
+    for f in frames:
+        if (
+            f.filename.startswith("modshim://")
+            and os.path.join("tracebacks_upper", "a.py") in f.filename
+        ):
+            target = f
+            break
+
+    assert target is not None, f"No upper frame found in traceback: {frames}"
+    # The raise is on line 5 of the file
+    assert target.lineno == 5
+    assert target.line is not None
+    assert target.line.strip() == 'raise RuntimeError("boom during upper import")'
+
+
+def test_stack_trace_lines_for_lower_import_error() -> None:
+    """Verify that tracebacks for errors in the lower module are correct."""
+    shim(
+        lower="tests.cases.tracebacks_lower",
+        upper="tests.cases.tracebacks_upper",
+        mount="mount_point",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        import mount_point.b as b  # pyright: ignore [reportMissingImports  # noqa: F401
+
+    frames = traceback.extract_tb(excinfo.value.__traceback__)
+    target = None
+    for f in frames:
+        if (
+            f.filename.startswith("modshim://")
+            and os.path.join("tracebacks_lower", "b.py") in f.filename
+        ):
+            target = f
+            break
+
+    assert target is not None, f"No lower frame found in traceback: {frames}"
+    assert target.lineno == 5
+    assert target.line is not None
+    assert target.line.strip() == 'raise RuntimeError("boom during lower import")'

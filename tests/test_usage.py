@@ -4,32 +4,10 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from importlib.abc import Loader
-from importlib.machinery import ModuleSpec
-from types import ModuleType
 
 import pytest
 
 from modshim import shim
-
-
-class _TestModuleLoader(Loader):
-    def __init__(self, module: ModuleType) -> None:
-        self.module = module
-
-    def create_module(self, spec: ModuleSpec) -> ModuleType:
-        return self.module
-
-    def exec_module(self, module: ModuleType) -> None:
-        pass
-
-
-class _TestModule(ModuleType):
-    """Test module type with proper typing."""
-
-    def __init__(self, name: str, doc: str = "") -> None:
-        super().__init__(name, doc)
-        self.__spec__ = ModuleSpec(name, _TestModuleLoader(self))
 
 
 def test_multiple_registrations() -> None:
