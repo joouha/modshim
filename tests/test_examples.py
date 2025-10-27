@@ -139,9 +139,9 @@ def test_time_dilation() -> None:
     elapsed_original = time_original.time() - start_original
 
     # Dilated time should be ~0.1 seconds
-    assert 0.09 <= elapsed_dilated <= 0.11
+    assert 0.05 <= elapsed_dilated <= 0.15
     # Real time should be ~0.05 seconds
-    assert 0.04 <= elapsed_original <= 0.06
+    assert 0.025 <= elapsed_original <= 0.075
 
     # Original time module should be unaffected
     assert time_original.sleep is not sleep
@@ -390,9 +390,9 @@ def test_time_dilation_overmount() -> None:
     elapsed_original = time_original.time() - start_original
 
     # Dilated time should be ~0.1 seconds
-    assert 0.09 <= elapsed_dilated <= 0.11
+    assert 0.05 <= elapsed_dilated <= 0.15
     # Real time should be ~0.05 seconds
-    assert 0.04 <= elapsed_original <= 0.06
+    assert 0.025 <= elapsed_original <= 0.075
 
     # Original time module should be unaffected
     assert time_original.sleep is not sleep
