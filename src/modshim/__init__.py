@@ -623,6 +623,9 @@ class ModShimLoader(Loader):
         lower_name = module.__name__.replace(self.mount_root, self.lower_root)
         upper_name = module.__name__.replace(self.mount_root, self.upper_root)
 
+        # Track __all__ from lower module
+        lower_all = None
+
         # Execute lower module first
         if lower_spec := self.lower_spec:
             lower_filename = f"modshim://{module.__file__}::{lower_spec.origin}"
@@ -716,6 +719,9 @@ class ModShimLoader(Loader):
 
                 if code_obj is not None:
                     exec(code_obj, module.__dict__)  # noqa: S102
+
+                # After executing lower module, capture __all__ if present
+                lower_all = module.__dict__.get("__all__")
 
             except:
                 if source_code is None and lower_spec:
@@ -859,6 +865,17 @@ class ModShimLoader(Loader):
                 raise
         # else:
         #     log.debug("No upper spec to execute")
+
+        # Merge __all__ from both modules if both exist
+        upper_all = module.__dict__.get("__all__")
+        if lower_all is not None and upper_all is not None:
+            # Combine both lists, preserving order and avoiding duplicates
+            # Lower module items first, then new items from upper
+            merged_all = list(lower_all)
+            for item in upper_all:
+                if item not in merged_all:
+                    merged_all.append(item)
+            module.__dict__["__all__"] = merged_all
 
         # Remove this module from processing set
         self._processing.discard(module)

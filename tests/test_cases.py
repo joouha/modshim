@@ -453,3 +453,196 @@ def test_stack_trace_lines_for_lower_import_error() -> None:
     assert target.lineno == 5
     assert target.line is not None
     assert target.line.strip() == 'raise RuntimeError("boom during lower import")'
+
+
+def test_star_import_from_mount_point() -> None:
+    """Test that star imports from a shimmed mount point bring in expected names."""
+    shim(
+        "tests.cases.extras_lower",
+        "tests.cases.extras_upper",
+        "tests.cases.extras_mount",
+    )
+
+    namespace: dict[str, object] = {}
+    exec("from tests.cases.extras_mount.mod import *", namespace)  # noqa: S102
+
+    assert "x" in namespace
+    assert namespace["x"] == 1
+    assert "y" in namespace
+    assert namespace["y"] == 2
+
+
+def test_star_import_from_upper() -> None:
+    """Test that star imports from an overmounted upper module bring in expected names."""
+    shim(
+        "tests.cases.extras_lower",
+        "tests.cases.extras_upper",
+        "tests.cases.extras_upper",
+    )
+
+    namespace: dict[str, object] = {}
+    exec("from tests.cases.extras_upper.mod import *", namespace)  # noqa: S102
+
+    assert "x" in namespace
+    assert namespace["x"] == 1
+    assert "y" in namespace
+    assert namespace["y"] == 2
+
+
+def test_star_import_extra_module_from_upper() -> None:
+    """Test that star imports from an extra module in upper bring in its names."""
+    shim(
+        "tests.cases.extras_lower",
+        "tests.cases.extras_upper",
+        "tests.cases.extras_upper",
+    )
+
+    namespace: dict[str, object] = {}
+    exec("from tests.cases.extras_upper.extra import *", namespace)  # noqa: S102
+
+    assert "z" in namespace
+    assert namespace["z"] == 1
+
+
+def test_star_import_auto_mount_upper() -> None:
+    """Test star imports when upper auto-mounts itself over lower."""
+    namespace: dict[str, object] = {}
+    exec("from tests.cases.auto_mount_upper.mod import *", namespace)  # noqa: S102
+
+    assert "x" in namespace
+    assert namespace["x"] == 11
+
+    namespace_extra: dict[str, object] = {}
+    exec("from tests.cases.auto_mount_upper.extra import *", namespace_extra)  # noqa: S102
+
+    assert "y" in namespace_extra
+    assert namespace_extra["y"] == 20
+
+
+def test_all_merged_from_both() -> None:
+    """Test that __all__ is correctly merged from both lower and upper modules."""
+    shim(
+        "tests.cases.all_lower",
+        "tests.cases.all_upper",
+        "tests.cases.all_mount",
+    )
+
+    import tests.cases.all_mount.mod  # pyright: ignore [reportMissingImports]
+
+    # Verify __all__ exists and contains items from both modules
+    assert hasattr(tests.cases.all_mount.mod, "__all__")
+    all_list = tests.cases.all_mount.mod.__all__
+
+    # Should contain items from lower first: ["x", "y"]
+    # Then new items from upper: ["a", "b"]
+    # "y" appears in both, so should only appear once (from lower position)
+    assert all_list == ["x", "y", "a", "b"]
+
+    # Verify all the expected attributes exist
+    assert tests.cases.all_mount.mod.x == 1
+    assert tests.cases.all_mount.mod.y == 22  # Upper overrides lower
+    assert tests.cases.all_mount.mod.z == 3  # From lower but not in __all__
+    assert tests.cases.all_mount.mod.a == 10
+    assert tests.cases.all_mount.mod.b == 20
+
+
+def test_all_star_import_merged() -> None:
+    """Test that star imports respect the merged __all__."""
+    shim(
+        "tests.cases.all_lower",
+        "tests.cases.all_upper",
+        "tests.cases.all_mount",
+    )
+
+    namespace: dict[str, object] = {}
+    exec("from tests.cases.all_mount.mod import *", namespace)  # noqa: S102
+
+    # Should include items in merged __all__
+    assert "x" in namespace
+    assert namespace["x"] == 1
+    assert "y" in namespace
+    assert namespace["y"] == 22  # Upper value
+    assert "a" in namespace
+    assert namespace["a"] == 10
+    assert "b" in namespace
+    assert namespace["b"] == 20
+
+    # Should NOT include items not in __all__
+    assert "z" not in namespace  # From lower but not in __all__
+    assert "_private" not in namespace  # Private variable
+
+
+def test_all_only_lower_has_all() -> None:
+    """Test __all__ when only the lower module defines it."""
+    shim(
+        "tests.cases.all_lower_only",
+        "tests.cases.all_upper_only",
+        "tests.cases.all_mount_lower_only",
+    )
+
+    import tests.cases.all_mount_lower_only.mod  # pyright: ignore [reportMissingImports]
+
+    # Should only have __all__ from lower since upper doesn't define it
+    assert hasattr(tests.cases.all_mount_lower_only.mod, "__all__")
+    all_list = tests.cases.all_mount_lower_only.mod.__all__
+    assert all_list == ["x", "y"]
+
+
+def test_all_only_upper_has_all() -> None:
+    """Test __all__ when only the upper module defines it."""
+    shim(
+        "tests.cases.all_upper_only",
+        "tests.cases.all_lower_only",
+        "tests.cases.all_mount_upper_only",
+    )
+
+    import tests.cases.all_mount_upper_only.mod  # pyright: ignore [reportMissingImports]
+
+    # Should only have __all__ from upper (which is actually lower in this reversed shim)
+    assert hasattr(tests.cases.all_mount_upper_only.mod, "__all__")
+    all_list = tests.cases.all_mount_upper_only.mod.__all__
+    assert all_list == ["x", "y"]
+
+
+def test_all_merged_overmount() -> None:
+    """Test __all__ merging when overmounting (mount == upper)."""
+    shim(
+        "tests.cases.all_lower",
+        "tests.cases.all_upper",
+        "tests.cases.all_upper",
+    )
+
+    import tests.cases.all_upper.mod  # pyright: ignore [reportMissingImports]
+
+    # Should have merged __all__
+    assert hasattr(tests.cases.all_upper.mod, "__all__")
+    all_list = tests.cases.all_upper.mod.__all__
+    assert all_list == ["x", "y", "a", "b"]
+
+    # Test star import
+    namespace: dict[str, object] = {}
+    exec("from tests.cases.all_upper.mod import *", namespace)  # noqa: S102
+
+    assert "x" in namespace
+    assert "y" in namespace
+    assert "a" in namespace
+    assert "b" in namespace
+    assert "z" not in namespace
+    assert "_private" not in namespace
+
+
+def test_upper_only_submodule_with_relative_import() -> None:
+    """Test that upper modules can use relative imports to import upper-only submodules."""
+    shim(
+        "tests.cases.relative_import_lower",
+        "tests.cases.relative_import_upper",
+        "tests.cases.relative_import_mount",
+    )
+
+    # This should work: the upper's __init__.py does a relative import of .extra
+    # which should resolve to tests.cases.relative_import_mount.extra
+    # and the finder should find tests.cases.relative_import_upper.extra
+    import tests.cases.relative_import_mount  # pyright: ignore [reportMissingImports]
+
+    assert hasattr(tests.cases.relative_import_mount, "something")
+    assert tests.cases.relative_import_mount.something == 42
