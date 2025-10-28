@@ -942,31 +942,36 @@ class ModShimFinder(MetaPathFinder):
 
         # Set flag indicating we are performing an internal lookup
         self._internal_call.active = True
+        exc = None
         try:
             # Find upper and lower specs using standard finders
             # (Our finder will ignore calls while _internal_call.active is True)
             try:
                 # log.debug("Finding lower spec %r", lower_name)
                 lower_spec = find_spec(lower_name)
-            except (ImportError, AttributeError):
+            except (ImportError, AttributeError) as exc_lower:
                 lower_spec = None
+                exc = exc_lower
             # log.debug("Found lower spec %r", lower_spec)
             try:
                 # log.debug("Finding upper spec %r", upper_name)
                 upper_spec = find_spec(upper_name)
-            except (ImportError, AttributeError):
+            except (ImportError, AttributeError) as exc_upper:
                 upper_spec = None
+                exc = exc_upper
             # log.debug("Found upper spec %r", upper_spec)
-
         finally:
             # Unset the internal call flag
             self._internal_call.active = False
 
         # Raise ImportError if neither module exists
         if lower_spec is None and upper_spec is None:
-            raise ImportError(
-                f"Cannot find module '{fullname}' (tried '{lower_name}' and '{upper_name}')"
-            )
+            if exc is None:
+                raise ImportError(
+                    f"Cannot find module '{fullname}' (tried '{lower_name}' and '{upper_name}')"
+                )
+            else:
+                raise exc
 
         # Create loader and spec using the correctly found specs
         loader = ModShimLoader(
