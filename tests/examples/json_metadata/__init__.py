@@ -1,5 +1,6 @@
 """Enhanced JSON module with metadata injection."""
 
+from json import dumps as original_dumps
 from typing import Any
 
 
@@ -14,8 +15,6 @@ def dumps(obj: dict[str, Any], *args: Any, **kwargs: Any) -> str:
     Returns:
         JSON formatted string with metadata added
     """
-    from json import dumps as original_dumps
-
     # Add a metadata field to all JSON output
     if isinstance(obj, dict):
         obj = obj.copy()

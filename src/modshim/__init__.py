@@ -239,11 +239,12 @@ def reference_rewrite_factory(
     exact: dict[str, tuple[int, str]] = {}
     prefix_by_first: dict[str, list[tuple[int, str, str]]] = {}
     for i, (search, replace) in enumerate(rules):
-        # Exact mapping for equality checks
-        exact[search] = (i, replace)
-        # Group prefix rules by first component to filter candidates cheaply
-        first = search.split(".", 1)[0]
-        prefix_by_first.setdefault(first, []).append((i, search, replace))
+        if search != replace:
+            # Exact mapping for equality checks
+            exact[search] = (i, replace)
+            # Group prefix rules by first component to filter candidates cheaply
+            first = search.split(".", 1)[0]
+            prefix_by_first.setdefault(first, []).append((i, search, replace))
 
     ReferenceRewriter._exact_rules = exact
     ReferenceRewriter._prefix_rules_by_first = prefix_by_first
@@ -784,6 +785,7 @@ class ModShimLoader(Loader):
                             rules = [
                                 (self.lower_root, self.mount_root),
                                 (module.__name__, working_name),
+                                (self.upper_root, self.mount_root),
                             ]
                             (
                                 rewritten_ast,
