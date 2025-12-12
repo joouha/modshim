@@ -949,8 +949,19 @@ class ModShimFinder(MetaPathFinder):
             # Find upper and lower specs using standard finders
             # (Our finder will ignore calls while _internal_call.active is True)
             try:
+                # Find lower spec without exec-ing the module
                 # log.debug("Finding lower spec %r", lower_name)
-                lower_spec = find_spec(lower_name)
+                parts = lower_name.split(".")
+                spec = None
+                path = None
+                for i in range(1, len(parts) + 1):
+                    name = ".".join(parts[:i])
+                    for finder in sys.meta_path:
+                        spec = finder.find_spec(name, path, None)
+                        if spec is not None:
+                            path = spec.submodule_search_locations
+                            break
+                lower_spec = spec
             except (ImportError, AttributeError) as exc_lower:
                 lower_spec = None
                 exc = exc_lower
