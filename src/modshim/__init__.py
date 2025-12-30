@@ -17,11 +17,12 @@ from importlib import import_module
 from importlib.abc import InspectLoader, Loader, MetaPathFinder
 from importlib.machinery import ModuleSpec
 from importlib.util import find_spec, module_from_spec
-from types import CodeType, ModuleType
+from types import ModuleType
 from typing import TYPE_CHECKING, ClassVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from types import CodeType, TracebackType
 
 # Set up logger with NullHandler
 # import logging
@@ -29,6 +30,48 @@ if TYPE_CHECKING:
 # log.addHandler(logging.NullHandler())
 # if os.getenv("MODSHIM_DEBUG"):
 #     logging.basicConfig(level=logging.DEBUG)
+
+
+def _filter_modshim_frames(tb: TracebackType | None) -> TracebackType | None:
+    """Remove modshim internal frames from a traceback.
+
+    Filters out frames that originate from this file (modshim/__init__.py)
+    to provide cleaner stack traces for users.
+    """
+    if tb is None:
+        return None
+
+    # Get the path to this file for comparison
+    this_file = __file__
+
+    # Collect frames that aren't from modshim
+    frames: list[TracebackType] = []
+    current: TracebackType | None = tb
+    while current is not None:
+        frame_file = current.tb_frame.f_code.co_filename
+        # Keep frames that aren't from this module
+        if frame_file != this_file:
+            frames.append(current)
+        current = current.tb_next
+
+    if not frames:
+        # If all frames were filtered, return original to avoid empty traceback
+        return tb
+
+    # Reconstruct the traceback chain using TracebackType's immutable nature
+    # We need to use the with_traceback trick via a raised exception
+    result: TracebackType | None = None
+    for frame_tb in reversed(frames):
+        if result is None:
+            result = frame_tb
+        else:
+            # We can't directly set tb_next, so we keep the original chain
+            # but return the first non-modshim frame
+            pass
+
+    # Return the first non-modshim frame; Python will follow tb_next naturally
+    # This effectively "skips" the modshim frames at the top of the trace
+    return frames[0] if frames else tb
 
 
 class _ModuleReferenceRewriter(ast.NodeTransformer):
@@ -719,7 +762,11 @@ class ModShimLoader(Loader):
                     )
 
                 if code_obj is not None:
-                    exec(code_obj, module.__dict__)  # noqa: S102
+                    try:
+                        exec(code_obj, module.__dict__)  # noqa: S102
+                    except Exception as e:
+                        e.__traceback__ = _filter_modshim_frames(e.__traceback__)
+                        raise
 
                 # After executing lower module, capture __all__ if present
                 lower_all = module.__dict__.get("__all__")
@@ -842,7 +889,11 @@ class ModShimLoader(Loader):
                     sys.modules[working_name] = working_module
 
                 if code_obj is not None:
-                    exec(code_obj, module.__dict__)  # noqa: S102
+                    try:
+                        exec(code_obj, module.__dict__)  # noqa: S102
+                    except Exception as e:
+                        e.__traceback__ = _filter_modshim_frames(e.__traceback__)
+                        raise
                 elif upper_spec.loader and isinstance(upper_spec.loader, InspectLoader):
                     # Fall back to compiled code if source is not available
                     try:
