@@ -646,3 +646,103 @@ def test_upper_only_submodule_with_relative_import() -> None:
 
     assert hasattr(tests.cases.relative_import_mount, "something")
     assert tests.cases.relative_import_mount.something == 42
+
+
+def test_modshim_frames_filtered_from_traceback() -> None:
+    """Test that modshim internal frames are filtered from exception tracebacks."""
+    shim(
+        lower="tests.cases.tracebacks_lower",
+        upper="tests.cases.tracebacks_upper",
+        mount="mount_point_filter_test",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        import mount_point_filter_test.a  # pyright: ignore [reportMissingImports]  # noqa: F401
+
+    # Extract all frames from the traceback
+    frames = traceback.extract_tb(excinfo.value.__traceback__)
+
+    # Verify no frames come from modshim/__init__.py
+    modshim_frames = [
+        f
+        for f in frames
+        if "modshim" in f.filename
+        and f.filename.endswith("__init__.py")
+        and "tests"
+        not in f.filename  # Exclude test files that might have "modshim" in path
+    ]
+
+    assert len(modshim_frames) == 0, (
+        f"Expected no modshim internal frames in traceback, but found: "
+        f"{[(f.filename, f.name, f.lineno) for f in modshim_frames]}"
+    )
+
+    # Verify the traceback still contains the actual error location
+    error_frames = [
+        f for f in frames if "tracebacks_upper" in f.filename and "a.py" in f.filename
+    ]
+    assert len(error_frames) >= 1, (
+        "Expected at least one frame from the upper module where the error occurred"
+    )
+
+
+def test_modshim_frames_filtered_lower_module_error() -> None:
+    """Test that modshim frames are filtered when error occurs in lower module."""
+    shim(
+        lower="tests.cases.tracebacks_lower",
+        upper="tests.cases.tracebacks_upper",
+        mount="mount_point_filter_test_lower",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        import mount_point_filter_test_lower.b  # pyright: ignore [reportMissingImports]  # noqa: F401
+
+    frames = traceback.extract_tb(excinfo.value.__traceback__)
+
+    # Verify no frames come from modshim/__init__.py
+    modshim_frames = [
+        f
+        for f in frames
+        if "modshim" in f.filename
+        and f.filename.endswith("__init__.py")
+        and "tests" not in f.filename
+    ]
+
+    assert len(modshim_frames) == 0, (
+        f"Expected no modshim internal frames in traceback, but found: "
+        f"{[(f.filename, f.name, f.lineno) for f in modshim_frames]}"
+    )
+
+    # Verify the traceback contains the actual error location in lower module
+    error_frames = [
+        f for f in frames if "tracebacks_lower" in f.filename and "b.py" in f.filename
+    ]
+    assert len(error_frames) >= 1, (
+        "Expected at least one frame from the lower module where the error occurred"
+    )
+
+
+def test_traceback_preserves_user_frames() -> None:
+    """Test that user code frames are preserved while modshim frames are filtered."""
+    shim(
+        lower="tests.cases.tracebacks_lower",
+        upper="tests.cases.tracebacks_upper",
+        mount="mount_point_preserve_test",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        import mount_point_preserve_test.a  # pyright: ignore [reportMissingImports]  # noqa: F401
+
+    frames = traceback.extract_tb(excinfo.value.__traceback__)
+
+    # The traceback should have at least the test frame and the error frame
+    assert len(frames) >= 1, "Traceback should not be empty"
+
+    # Verify we can still see the actual error source
+    frame_files = [f.filename for f in frames]
+    has_error_source = any(
+        "tracebacks_upper" in f or "tracebacks_lower" in f for f in frame_files
+    )
+    assert has_error_source, (
+        f"Traceback should contain the error source file, got: {frame_files}"
+    )
