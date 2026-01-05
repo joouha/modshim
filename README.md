@@ -142,6 +142,62 @@ Now, anyone can use your enhanced version simply by importing your package:
 * multiple lines.
 ```
 
+## Mounting Over the Original Module
+
+In some cases, you may want your enhanced module to completely replace the original module name. This allows existing code to benefit from your enhancements without changing any import statements.
+
+For example, suppose you want all imports of `textwrap` in your application to automatically use your enhanced version with the `prefix` feature. You can do this by setting the `mount` point to the same name as the `lower` module:
+
+```python
+# my_app/setup_enhancements.py
+from modshim import shim
+
+shim(
+    lower="textwrap",
+    upper="prefixed_textwrap",
+    mount="textwrap",  # Mount over the original module name
+)
+```
+
+After this `shim()` call executes, any subsequent imports of `textwrap` will use the combined module:
+
+```python
+# my_app/main.py
+from my_app import setup_enhancements  # Apply the shim first
+
+# Now the standard import gets our enhanced version!
+from textwrap import wrap
+
+text = "This is a long sentence that will be wrapped into multiple lines."
+for line in wrap(text, width=30, prefix=">> "):
+    print(line)
+```
+
+Output:
+```
+>> This is a long sentence that
+>> will be wrapped into
+>> multiple lines.
+```
+
+### Use Case: Transparent Bug Fixes
+
+This pattern is particularly useful when you need to apply a bug fix or security patch to a library that is used throughout your codebase or by third-party dependencies. Instead of modifying every import statement, you can apply the fix once at application startup:
+
+```python
+# my_app/__init__.py
+from modshim import shim
+
+# Apply our fix to the json module globally
+shim(lower="json", upper="json_fixes", mount="json")
+```
+
+Now all code—including third-party libraries—that imports `json` will use your patched version.
+
+### Caution
+
+Mounting over the original module affects all subsequent imports in your application, including those from third-party libraries. Use this pattern carefully and ensure your enhancements are fully backward-compatible with the original module's API.
+
 ## Advanced Example: Adding Configurable Retries to `requests`
 
 Let's tackle a more complex, real-world scenario. We want to add a robust, configurable retry mechanism to `requests` for handling transient network issues or server errors. The standard way to do this in `requests` is by creating a `Session` object and mounting a custom `HTTPAdapter`.
