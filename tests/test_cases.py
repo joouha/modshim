@@ -415,7 +415,7 @@ def test_stack_trace_lines_for_upper_import_error() -> None:
     target = None
     for f in frames:
         if (
-            f.filename.startswith("modshim://")
+            f.filename.startswith("<modshim ")
             and os.path.join("tracebacks_upper", "a.py") in f.filename
         ):
             target = f
@@ -443,7 +443,7 @@ def test_stack_trace_lines_for_lower_import_error() -> None:
     target = None
     for f in frames:
         if (
-            f.filename.startswith("modshim://")
+            f.filename.startswith("<modshim ")
             and os.path.join("tracebacks_lower", "b.py") in f.filename
         ):
             target = f
