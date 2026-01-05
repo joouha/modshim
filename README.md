@@ -52,8 +52,8 @@ Next, use `modshim` to mount your modifications over the original `textwrap` mod
 ```python
 >>> from modshim import shim
 >>> shim(
-...     upper="prefixed_textwrap",  # Module with your modifications
 ...     lower="textwrap",           # Original module to enhance
+...     upper="prefixed_textwrap",  # Module with your modifications
 ...     mount="super_textwrap",     # Name for the new, merged module
 ... )
 ```

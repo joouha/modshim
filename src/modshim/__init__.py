@@ -848,12 +848,9 @@ def shim(lower: str, upper: str = "", mount: str = "") -> None:
     the mount point.
 
     Args:
-        upper: The name of the upper module or package
         lower: The name of the lower module or package
+        upper: The name of the upper module or package
         mount: The name of the mount point
-
-    Returns:
-        The combined module or package
     """
     # Check if we're already inside this function in the current thread
     # This prevents `shim` calls in modules from triggering recursion loops for
