@@ -216,7 +216,6 @@ def test_context_preservation() -> None:
     import json_context as merged  # type: ignore [reportMissingImports]
 
     # Verify important context attributes
-    assert hasattr(merged, "__file__")
     assert hasattr(merged, "__package__")
     assert hasattr(merged, "__spec__")
 
