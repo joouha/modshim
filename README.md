@@ -342,6 +342,8 @@ This allows your enhancement code to subclass or wrap the original implementatio
 
 The system is thread-safe, handles sub-modules recursively, and supports bytecode caching for performance. All of this happens without modifying any source code on disk.
 
+There is a minor performance cost when an enhancement module is first imported and the AST rewriting is performed. However, the rewritten code is cached as bytecode, so subsequent imports do not carry this performance cost.
+
 
 ## Why Not Monkey-Patch?
 
