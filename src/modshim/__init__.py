@@ -663,19 +663,18 @@ else:
         return code.encode()
 
     def path_stats(self, path: str) -> dict[str, float | int]:
-        """Return the metadata for the path."""
-        result = {"mtime": 0.0, "size": 0}
-        _, name = os.path.split(path)
+        """Return the metadata for the path.
+
+        Set `size` to `None` to avoid file size checks - this would only be possible by
+        rewriting source code to get the size, defeating the point of caching.
+        """
+        result = {"mtime": 0.0, "size": None}
+        _dir, name = os.path.split(path)
         if name.startswith("__modshim__"):
             for spec in (self.lower_spec, self.upper_spec):
                 if spec and spec.origin:
                     st = os.stat(spec.origin)
                     result["mtime"] = max(result["mtime"], st.st_mtime)
-                    result["size"] += st.st_size
-        else:
-            st = os.stat(path)
-            result["mtime"] = st.st_mtime
-            result["size"] = st.st_size
         return result
 
     def exec_module(self, module: ModuleType) -> None:
