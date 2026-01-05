@@ -358,6 +358,7 @@ class ModShimLoader(SourceFileLoader):
         self.upper_root: str = upper_root
         self.mount_root: str = mount_root
         self.finder: ModShimFinder = finder
+        self.upper_root_origin = ""
 
         # Set flag indicating we are performing an internal lookup
         finder._internal_call.active = True
@@ -366,7 +367,8 @@ class ModShimLoader(SourceFileLoader):
                 upper_root_spec = find_spec(upper_root)
             except (ImportError, AttributeError):
                 upper_root_spec = None
-            self.upper_root_origin = upper_root_spec.origin if upper_root_spec else None
+            if upper_root_spec and upper_root_spec.origin:
+                self.upper_root_origin = upper_root_spec.origin
         finally:
             # Unset the internal call flag
             finder._internal_call.active = False
@@ -401,12 +403,17 @@ class ModShimLoader(SourceFileLoader):
             return tree, set()
         return new_tree, set(transformer.triggered)
 
-    def get_filename(self, fullname: str) -> str:
-        """Return the path to the source file as found by the finder."""
-        self.fullname = fullname
+    def get_filename(self, name: str | None = None) -> str:
+        """Return the path to the source file as found by the finder.
+
+        We return a virtual path within the upper module, which is used to calculate an
+        existing cache path for the modshim pyc file.
+        """
+        assert name is not None
+        self.fullname = name
         root_path, _filename = os.path.split(self.upper_root_origin)
-        source_path = os.path.join(root_path, f"__modshim__{fullname}.py")
-        return source_path
+        v_source_path = os.path.join(root_path, f"__modshim__.{name}.py")
+        return v_source_path
 
     def get_data(self, path: str) -> bytes:
         """Generate execution script.
@@ -653,7 +660,7 @@ else:
         """
         result = {"mtime": 0.0, "size": None}
         _dir, name = os.path.split(path)
-        if name.startswith("__modshim__"):
+        if name.startswith("__modshim__."):
             for spec in (self.lower_spec, self.upper_spec):
                 if spec and spec.origin:
                     st = os.stat(spec.origin)
