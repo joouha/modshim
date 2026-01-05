@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ast
 import io
-import linecache
 import marshal
 import os
 import os.path
@@ -299,7 +298,7 @@ def reference_rewrite_factory(
     return ReferenceRewriter
 
 
-def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
+def get_module_source(spec: ModuleSpec) -> str | None:
     """Get the source code of a module using its loader.
 
     Args:
@@ -314,7 +313,7 @@ def get_module_source(module_name: str, spec: ModuleSpec) -> str | None:
 
     try:
         # Try to get the source directly
-        return spec.loader.get_source(module_name)
+        return spec.loader.get_source(spec.name)
     except (ImportError, AttributeError):
         return None
 
@@ -464,15 +463,8 @@ class ModShimLoader(SourceFileLoader):
                         code_obj = native_code
 
                 if code_obj is None:
-                    source_code = get_module_source(lower_name, lower_spec)
+                    source_code = get_module_source(lower_spec)
                     if source_code is not None:
-                        # Add source to linecache
-                        linecache.cache[lower_filename] = (
-                            len(source_code),
-                            None,
-                            source_code.splitlines(True),
-                            lower_filename,
-                        )
                         source_len += len(source_code)
                         rules = [(self.lower_root, self.mount_root)]
                         # Rewrite the source to get an AST
@@ -541,14 +533,8 @@ class ModShimLoader(SourceFileLoader):
                     working_needed = False
 
             if code_obj is None:
-                source_code = get_module_source(upper_name, upper_spec)
+                source_code = get_module_source(upper_spec)
                 if source_code is not None:
-                    linecache.cache[upper_filename] = (
-                        len(source_code),
-                        None,
-                        source_code.splitlines(True),
-                        upper_filename,
-                    )
                     source_len += len(source_code)
                     rules = [
                         (self.lower_root, self.mount_root),
@@ -604,6 +590,7 @@ exec(
     """
             else:
                 # Exec lower module if we could not rewrite Python code
+                # and copy module's __dict__ to currently executing module
                 code += f"""
 from importlib.util import find_spec, module_from_spec
 lower_spec = find_spec("{lower_spec.name}")
@@ -656,10 +643,6 @@ else:
     del __all_lower__
 """
 
-        # print(lower_spec, upper_spec)
-        # for line in code.splitlines():
-        #     print(line[:200])
-        # print()
         return code.encode()
 
     def path_stats(self, path: str) -> dict[str, float | int]:
@@ -687,6 +670,25 @@ else:
         try:
             exec(code, module.__dict__)  # noqa: S102
         except Exception as e:
+            import linecache
+
+            # Add source to line cache
+            for spec in (self.lower_spec, self.upper_spec):
+                if (
+                    spec is not None
+                    and spec.origin is not None
+                    and (source_code := get_module_source(spec)) is not None
+                ):
+                    # Add source to linecache
+                    filename = f"<modshim {self.fullname}::{spec.origin}>"
+                    linecache.cache[filename] = (
+                        len(source_code),
+                        None,
+                        source_code.splitlines(True),
+                        filename,
+                    )
+
+            # Filter traceback
             e.__traceback__ = _filter_modshim_frames(e.__traceback__)
             raise
 
