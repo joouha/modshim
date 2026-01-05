@@ -303,19 +303,42 @@ HTTPSConnectionPool(host='httpbin.org', port=443): Max retries exceeded with url
 
 ## How It Works
 
-`modshim` creates virtual merged modules by intercepting Python's import system. At its core, modshim works by installing a custom import finder (`ModShimFinder`) into `sys.meta_path`.
+`modshim` creates virtual merged modules by extending Python's import system. At its core, modshim works by installing a custom import finder (`ModShimFinder`) into `sys.meta_path`.
 
 When you call `shim()`, it registers a mapping between three module names: the "lower" (original) module, the "upper" (enhancement) module, and the "mount" point (the name under which the combined module will be accessible).
 
 When the mounted module is imported, the finder:
 
 1. Locates both the lower and upper modules using Python's standard import machinery.
-2. Creates a new virtual module at the mount point.
-3. Executes the lower module's code first, establishing the base functionality.
-4. Executes the upper module's code, which can override or extend the lower module's attributes.
-5. Handles imports within these modules by rewriting their ASTs (Abstract Syntax Trees) to redirect internal references to the new mount point.
+2. Creates a module spec for a new virtual module at the mount point.
+3. Executes the lower module's code first, establishing the base functionality. A temporary "working" copy of this namespace is saved.
+4. Executes the upper module's code, which can override or extend the lower module's attributes. The upper module can access the original lower module's attributes through the working copy.
+5. Combines `__all__` from both modules if present.
 
-This AST transformation is key. It ensures that when code in either module imports from its own package (e.g., a relative import), those imports are redirected to the new, combined module. This maintains consistency and prevents circular import issues.
+### AST Rewriting
+
+The key mechanism that makes this work is AST (Abstract Syntax Tree) rewriting. When loading each module's source code, `modshim` parses it and transforms import statements and module references:
+
+- **Import statements** (`import X` and `from X import Y`) are rewritten to point to the mount point instead of the original package names.
+- **Attribute access** (e.g., `urllib.response`) is also rewritten when it references the lower or upper module names.
+
+For example, if you mount `requests_extra` over `requests` at mount point `requests_extra`:
+- Code in `requests` that does `from requests.sessions import Session` gets rewritten to `from requests_extra.sessions import Session`.
+- Code in `requests_extra` that does `from requests import Response` gets rewritten to `from requests_extra import Response`.
+
+This ensures that when code in either module imports from its own package, those imports resolve to the new, combined module. This maintains consistency and allows the upper module's enhancements to be used throughout.
+
+### Working Module Mechanism
+
+When your upper module imports from the lower module (e.g., `from textwrap import TextWrapper as OriginalTextWrapper`), `modshim` needs special handling to provide the *original* class rather than creating a circular reference. It does this by:
+
+1. Executing the lower module's code and capturing its namespace.
+2. Creating a temporary "working" module (e.g., `_working_textwrap`) containing this namespace.
+3. Rewriting the upper module's imports to reference this working module when it imports from itself.
+
+This allows your enhancement code to subclass or wrap the original implementations.
+
+### Performance and Safety
 
 The system is thread-safe, handles sub-modules recursively, and supports bytecode caching for performance. All of this happens without modifying any source code on disk.
 
