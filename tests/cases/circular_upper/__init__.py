@@ -3,7 +3,7 @@
 from modshim import shim
 
 shim(
-    "tests.cases.circular_a",
-    "tests.cases.circular_b",
-    "tests.cases.circular_b",
+    "tests.cases.circular_lower",
+    "tests.cases.circular_lower",
+    "tests.cases.circular_upper",
 )
