@@ -15,15 +15,15 @@ import sys
 import threading
 from importlib import import_module
 from importlib.abc import InspectLoader, MetaPathFinder
-from importlib.machinery import ModuleSpec
+from importlib.machinery import ModuleSpec, SourceFileLoader
 from importlib.util import find_spec
+from types import TracebackType
 from typing import TYPE_CHECKING, ClassVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from types import CodeType, ModuleType, TracebackType
+    from types import CodeType, ModuleType
 
-from importlib.machinery import SourceFileLoader
 
 # Set up logger with NullHandler
 # import logging
@@ -36,45 +36,34 @@ from importlib.machinery import SourceFileLoader
 def _filter_modshim_frames(tb: TracebackType | None) -> TracebackType | None:
     """Remove modshim internal frames from a traceback.
 
-    Filters out frames that originate from this file (modshim/__init__.py)
-    to provide cleaner stack traces for users.
+    Filters out frames that originate from this file (``modshim/__init__.py``)
+    and virtual modshim modules (``__modshim__.*.py``) to provide cleaner stack traces.
     """
     if tb is None:
         return None
-
-    # Collect frames that aren't from modshim
-    frames: list[TracebackType] = []
-    current: TracebackType | None = tb
-    while current is not None:
-        frame_file = current.tb_frame.f_code.co_filename
-        # Keep frames that aren't from this module
+    # Collect traceback entries that aren't from modshim
+    tb_entries: list[tuple[TracebackType, int, int]] = []
+    original_tb = tb
+    while tb is not None:
+        frame_file = tb.tb_frame.f_code.co_filename
         if (
             # Discard frames from within this file
             frame_file != __file__
             # Discard frames from cached modshim bytecode execution scripts
-            and "__modshim__" not in frame_file
+            and "__modshim__." not in frame_file
+            # filter importlib
+            and "importlib._bootstrap" not in frame_file
         ):
-            frames.append(current)
-        current = current.tb_next
-
-    if not frames:
-        # If all frames were filtered, return original to avoid empty traceback
-        return tb
-
-    # Reconstruct the traceback chain using TracebackType's immutable nature
-    # We need to use the with_traceback trick via a raised exception
-    result: TracebackType | None = None
-    for frame_tb in reversed(frames):
-        if result is None:
-            result = frame_tb
-        else:
-            # We can't directly set tb_next, so we keep the original chain
-            # but return the first non-modshim frame
-            pass
-
-    # Return the first non-modshim frame; Python will follow tb_next naturally
-    # This effectively "skips" the modshim frames at the top of the trace
-    return frames[0] if frames else tb
+            tb_entries.append((tb, tb.tb_lasti, tb.tb_lineno))
+        tb = tb.tb_next
+    # If we accidentally filtered everything, return original traceback
+    if not tb_entries:
+        return original_tb
+    # Reconstruct traceback from filtered entries
+    new_tb: TracebackType | None = None
+    for tb_entry, lasti, lineno in reversed(tb_entries):
+        new_tb = TracebackType(new_tb, tb_entry.tb_frame, lasti, lineno)
+    return new_tb
 
 
 class _ModuleReferenceRewriter(ast.NodeTransformer):
