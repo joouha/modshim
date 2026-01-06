@@ -1,6 +1,7 @@
 """Various example test cases for modshim."""
 
 import os
+import sys
 import traceback
 from types import ModuleType
 
@@ -648,6 +649,10 @@ def test_upper_only_submodule_with_relative_import() -> None:
     assert tests.cases.relative_import_mount.something == 42
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="Traceback filtering requires Python 3.11+",
+)
 def test_modshim_frames_filtered_from_traceback() -> None:
     """Test that modshim internal frames are filtered from exception tracebacks."""
     shim(
@@ -686,6 +691,10 @@ def test_modshim_frames_filtered_from_traceback() -> None:
     )
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="Traceback filtering requires Python 3.11+",
+)
 def test_modshim_frames_filtered_lower_module_error() -> None:
     """Test that modshim frames are filtered when error occurs in lower module."""
     shim(
