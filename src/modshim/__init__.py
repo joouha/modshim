@@ -176,14 +176,21 @@ class _ModuleReferenceRewriter(ast.NodeTransformer):
             if new_name != original_name:
                 made_change = True
                 self.triggered |= triggers
-                new_alias = ast.alias(
-                    name=new_name,
-                    asname=alias.asname,
-                    lineno=alias.lineno,
-                    col_offset=alias.col_offset,
-                    end_lineno=alias.end_lineno,
-                    end_col_offset=alias.end_col_offset,
-                )
+                # ast.alias gained location attributes in Python 3.10
+                if hasattr(alias, "lineno"):
+                    new_alias = ast.alias(
+                        name=new_name,
+                        asname=alias.asname,
+                        lineno=alias.lineno,
+                        col_offset=alias.col_offset,
+                        end_lineno=alias.end_lineno,
+                        end_col_offset=alias.end_col_offset,
+                    )
+                else:
+                    new_alias = ast.alias(
+                        name=new_name,
+                        asname=alias.asname,
+                    )
                 new_names.append(new_alias)
             else:
                 new_names.append(alias)
