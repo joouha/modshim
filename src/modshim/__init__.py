@@ -7,6 +7,7 @@ that includes functionality from both. Internal imports are redirected to the mo
 from __future__ import annotations
 
 import ast
+import hashlib
 import io
 import marshal
 import os
@@ -17,12 +18,12 @@ from importlib import import_module
 from importlib.abc import InspectLoader, MetaPathFinder
 from importlib.machinery import ModuleSpec, SourceFileLoader
 from importlib.util import find_spec
-from types import TracebackType
+from types import CodeType, TracebackType
 from typing import TYPE_CHECKING, ClassVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from types import CodeType, ModuleType
+    from types import ModuleType
 
 
 # Set up logger with NullHandler
@@ -326,6 +327,122 @@ def _preflight_needs_rewrite(code: str, rules: list[tuple[str, str]]) -> bool:
     return any(search in code or f"{search}." in code for search, _replace in rules)
 
 
+class ExtrasLoader(SourceFileLoader):
+    """Loader for extra modules that need import rewriting only.
+
+    This is a simpler loader than ModShimLoader - it only rewrites imports
+    in the source code without the complex double-execution logic. It leverages
+    SourceFileLoader's built-in bytecode caching by doing rewriting in get_data.
+    """
+
+    def __init__(
+        self,
+        fullname: str,
+        original_spec: ModuleSpec,
+        rules: list[tuple[str, str]],
+    ) -> None:
+        """Initialize the loader.
+
+        Args:
+            fullname: The full name of the module being loaded
+            original_spec: The original module spec
+            rules: List of (search, replace) tuples for import rewriting
+        """
+        self.fullname = fullname
+        self.original_spec = original_spec
+        self.rules = rules
+        # Compute a hash of the rules for cache isolation
+        self.hash = hashlib.md5(
+            "\n".join(",".join(rule) for rule in sorted(rules)).encode(),
+            usedforsecurity=False,
+        ).hexdigest()[:8]
+        # Initialize parent with the original path
+        origin = original_spec.origin or ""
+        super().__init__(fullname, origin)
+
+    def get_filename(self, name: str | None = None) -> str:
+        """Return a virtual filename for cache path calculation.
+
+        We return a virtual path that includes '__modshim__' and a hash
+        of the rules to ensure the cached bytecode is stored separately from
+        the original module's cache and invalidated when rules change.
+        """
+        origin = self.original_spec.origin or ""
+        if not origin:
+            return f"<modshim_extra {name}>"
+
+        # Create a virtual path for caching:
+        # /path/to/module.py -> /path/to/__modshim_extra__.<hash>.module.py
+        dir_path, filename = os.path.split(origin)
+        return os.path.join(dir_path, f"__modshim__.{self.hash}.{filename}")
+
+    def get_data(self, path: str) -> bytes:
+        """Get source data, rewriting imports as needed.
+
+        For .pyc files, delegate to parent. For source files, rewrite imports
+        and return a script that executes marshaled bytecode.
+        """
+        _path, ext = os.path.splitext(path)
+        if ext == ".pyc":
+            # Let parent handle cached bytecode
+            return super().get_data(path)
+
+        # Get original source
+        source_code = get_module_source(self.original_spec)
+        if source_code is None:
+            # Fall back to reading from original path
+            origin = self.original_spec.origin
+            if origin:
+                with open(origin, "rb") as f:
+                    return f.read()
+            raise OSError(f"Cannot get source for {self.fullname}")
+
+        # Check if rewriting is needed
+        if not _preflight_needs_rewrite(source_code, self.rules):
+            return source_code.encode()
+
+        # Rewrite imports in the source
+        transformer = reference_rewrite_factory(self.rules)()
+        tree = ast.parse(source_code)
+        new_tree = transformer.visit(tree)
+
+        if not transformer.triggered:
+            # No changes made, return original source
+            return source_code.encode()
+
+        # Compile rewritten AST to bytecode and marshal it
+        ast.fix_missing_locations(new_tree)
+        filename = f"<modshim_extra {self.fullname}::{self.original_spec.origin}>"
+        code_obj = compile(
+            new_tree,
+            filename,
+            "exec",
+            optimize=sys.flags.optimize,
+        )
+
+        from io import BytesIO
+
+        with BytesIO() as f:
+            marshal.dump(code_obj, f)
+            f.seek(0)
+            code_bytes = f.read()
+
+        # Return a script that executes the marshaled bytecode
+        script = f"import marshal\nexec(marshal.loads({code_bytes!r}))\n"
+        return script.encode()
+
+    def path_stats(self, path: str) -> dict[str, float | int]:
+        """Return the metadata for the path.
+
+        Uses the original source file's mtime for cache invalidation.
+        """
+        origin = self.original_spec.origin
+        if origin and os.path.exists(origin):
+            st = os.stat(origin)
+            return {"mtime": st.st_mtime, "size": st.st_size}
+        return {"mtime": 0, "size": 0}
+
+
 class ModShimLoader(SourceFileLoader):
     """Loader for shimmed modules."""
 
@@ -355,6 +472,12 @@ class ModShimLoader(SourceFileLoader):
         self.mount_root: str = mount_root
         self.finder: ModShimFinder = finder
         self.upper_root_origin = ""
+
+        # Compute a hash of the rules for cache isolation
+        self.hash = hashlib.md5(
+            f"{lower_root},{mount_root}\n{upper_root},{mount_root}".encode(),
+            usedforsecurity=False,
+        ).hexdigest()[:8]
 
         # Set flag indicating we are performing an internal lookup
         finder._internal_call.active = True
@@ -408,7 +531,7 @@ class ModShimLoader(SourceFileLoader):
         assert name is not None
         self.fullname = name
         root_path, _filename = os.path.split(self.upper_root_origin)
-        v_source_path = os.path.join(root_path, f"__modshim__.{name}.py")
+        v_source_path = os.path.join(root_path, f"__modshim__.{self.hash}.{name}.py")
         return v_source_path
 
     def get_data(self, path: str) -> bytes:
@@ -697,10 +820,12 @@ else:
 
 
 class ModShimFinder(MetaPathFinder):
-    """Finder for shimmed modules."""
+    """Finder for shimmed modules and extras with import rewriting."""
 
     # Dictionary mapping mount points to (upper_module, lower_module) tuples
     _mappings: ClassVar[dict[str, tuple[str, str]]] = {}
+    # Dictionary mapping extra module roots to their rewrite rules
+    _extras: ClassVar[dict[str, list[tuple[str, str]]]] = {}
     # Thread-local storage to track internal find_spec calls
     _internal_call: ClassVar[threading.local] = threading.local()
 
@@ -717,6 +842,23 @@ class ModShimFinder(MetaPathFinder):
         """
         cls._mappings[mount_root] = (upper_root, lower_root)
 
+    @classmethod
+    def register_extra(cls, extra_root: str, rules: list[tuple[str, str]]) -> None:
+        """Register an extra module for import rewriting.
+
+        Args:
+            extra_root: The root package name of the extra module
+            rules: List of (search, replace) tuples for import rewriting
+        """
+        if extra_root in cls._extras:
+            # Merge rules, avoiding duplicates
+            existing = cls._extras[extra_root]
+            for rule in rules:
+                if rule not in existing:
+                    existing.append(rule)
+        else:
+            cls._extras[extra_root] = list(rules)
+
     def find_spec(
         self,
         fullname: str,
@@ -724,31 +866,61 @@ class ModShimFinder(MetaPathFinder):
         target: ModuleType | None = None,
     ) -> ModuleSpec | None:
         """Find a module spec for the given module name."""
-        # log.debug("Find spec called for %r", fullname)
-
-        # If this find_spec is called internally from _create_spec, ignore it
+        # If this find_spec is called internally, ignore it
         # to allow standard finders to locate the original lower/upper modules.
         if getattr(self._internal_call, "active", False):
             return None
 
-        # Check if this is a direct mount point
+        # Check shimmed modules first (higher priority)
         if fullname in self._mappings:
             upper_root, lower_root = self._mappings[fullname]
-            return self._create_spec(fullname, upper_root, lower_root, fullname)
+            return self._create_shim_spec(fullname, upper_root, lower_root, fullname)
 
-        # Check if this is a submodule of a mount point
         for mount_root, (upper_root, lower_root) in self._mappings.items():
-            # if fullname.startswith(f"{mount_root}."):
             if fullname.startswith(f"{mount_root}."):
-                # if not (fullname.startswith((f"{upper_root}.", f"{lower_root}."))):
-                return self._create_spec(fullname, upper_root, lower_root, mount_root)
+                return self._create_shim_spec(
+                    fullname, upper_root, lower_root, mount_root
+                )
+
+        # Check extras (import rewriting only)
+        for extra_root, rules in self._extras.items():
+            if fullname == extra_root or fullname.startswith(f"{extra_root}."):
+                return self._create_extras_spec(fullname, rules)
 
         return None
 
-    def _create_spec(
+    def _create_extras_spec(
+        self, fullname: str, rules: list[tuple[str, str]]
+    ) -> ModuleSpec | None:
+        """Create a module spec for extras with import rewriting."""
+        self._internal_call.active = True
+        try:
+            original_spec = find_spec(fullname)
+        except (ImportError, AttributeError):
+            original_spec = None
+        finally:
+            self._internal_call.active = False
+
+        if original_spec is None:
+            return None
+
+        loader = ExtrasLoader(fullname, original_spec, rules)
+        spec = ModuleSpec(
+            name=fullname,
+            loader=loader,
+            origin=original_spec.origin,
+            is_package=original_spec.submodule_search_locations is not None,
+        )
+        if original_spec.submodule_search_locations is not None:
+            spec.submodule_search_locations = list(
+                original_spec.submodule_search_locations
+            )
+        return spec
+
+    def _create_shim_spec(
         self, fullname: str, upper_root: str, lower_root: str, mount_root: str
     ) -> ModuleSpec:
-        """Create a module spec for the given module name."""
+        """Create a module spec for shimmed modules."""
         # Calculate full lower and upper names
         lower_name = fullname.replace(mount_root, lower_root)
         upper_name = fullname.replace(mount_root, upper_root)
@@ -836,7 +1008,12 @@ class ModShimFinder(MetaPathFinder):
 _shim_state = threading.local()
 
 
-def shim(lower: str, upper: str = "", mount: str = "") -> None:
+def shim(
+    lower: str,
+    upper: str = "",
+    mount: str = "",
+    extras: Sequence[str] | None = None,
+) -> None:
     """Mount an upper module or package on top of a lower module or package.
 
     This function sets up import machinery to dynamically combine modules
@@ -847,6 +1024,9 @@ def shim(lower: str, upper: str = "", mount: str = "") -> None:
         lower: The name of the lower module or package
         upper: The name of the upper module or package
         mount: The name of the mount point
+        extras: Optional sequence of additional module names where imports
+            should be rewritten (e.g., third-party packages that import from
+            the lower module but should use the mount point instead)
     """
     # Check if we're already inside this function in the current thread
     # This prevents `shim` calls in modules from triggering recursion loops for
@@ -904,6 +1084,21 @@ def shim(lower: str, upper: str = "", mount: str = "") -> None:
                 if name.startswith(f"{mount}."):
                     del sys.modules[name]
             _ = import_module(mount)
+
+        # Register extras if provided
+        if extras:
+            # Create rewrite rules: lower -> mount
+            rules = [(lower, mount)]
+
+            # Register each extra module
+            for extra in extras:
+                ModShimFinder.register_extra(extra, rules)
+
+                # Clear any already-imported extra modules so they get reloaded
+                # with the new import rewriting
+                for name in list(sys.modules):
+                    if name == extra or name.startswith(f"{extra}."):
+                        del sys.modules[name]
 
     finally:
         # Always clear the running flag when we exit

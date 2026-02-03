@@ -301,6 +301,69 @@ HTTPSConnectionPool(host='httpbin.org', port=443): Max retries exceeded with url
 - **Internal Reference Rewriting**: This example demonstrates `modshim`'s most powerful feature. By replacing `requests.sessions.Session`, we automatically upgraded top-level functions like `requests.get()` because their internal references to Session are redirected to our new class.
 - **Preservation of the Original Module**: The original `requests` package is not altered. Code in other parts of an application that imports `requests` directly will continue to use the original `Session` object without any retry logic, preventing unintended side-effects.
 
+## Rewriting Imports in Third-Party Packages
+
+Sometimes you need third-party packages to use your shimmed module instead of the original. For example, if you've created `json_enhanced` to add schema validation to the `json` module, you might also use a package like `configparser` that imports from `json` internally. You want `configparser` to use your enhanced version without modifying its source code.
+
+The `extras` parameter solves this by specifying additional packages where imports should be rewritten:
+
+```python
+from modshim import shim
+
+# Shim json with json_enhanced
+# Also rewrite imports in configparser to use the shimmed version
+shim(
+    lower="json",
+    upper="json_enhanced",
+    extras=["configparser"],
+)
+```
+
+Now when `configparser` is imported, any `import json` or `from json import ...` statements in its code will be rewritten to use `json_enhanced` instead.
+
+### How It Works
+
+When you specify `extras`, modshim registers the extra packages with the same `ModShimFinder` that handles shimmed modules. When an extra package is imported:
+
+1. The finder intercepts the import and locates the original module.
+2. The source code is parsed and import statements referencing the lower module are rewritten to use the mount point.
+3. The rewritten code is compiled and executed.
+
+This is simpler than the full shimming process—it only rewrites imports without the complex module merging logic.
+
+### Use Cases
+
+- **Extending libraries used by dependencies**: Enhance a core library and have all packages that depend on it use your enhanced version.
+- **Applying fixes across an ecosystem**: Fix a bug in a foundational package and ensure all dependent packages benefit.
+- **Testing alternative implementations**: Swap out a library for testing purposes across your entire dependency tree.
+
+### Example: Enhanced JSON Across Dependencies
+
+Suppose you've created `json_enhanced` with additional features, and you want the `urllib.request` module (which uses `json` internally for certain operations) to use your enhanced version:
+
+```python
+from modshim import shim
+
+shim(
+    lower="json",
+    upper="json_enhanced",
+    mount="json_enhanced",
+    extras=["urllib.request"],
+)
+
+# Now urllib.request will use json_enhanced internally
+import urllib.request
+# Any JSON operations within urllib.request use json_enhanced
+```
+
+### Caution
+
+The `extras` feature rewrites imports at load time, which means:
+
+- Extra packages are reloaded if they were already imported before the `shim()` call.
+- Only source-based packages can have their imports rewritten (not compiled extensions).
+- Use this feature judiciously, as it changes the behavior of third-party code.
+
 ## How It Works
 
 `modshim` creates virtual merged modules by extending Python's import system. At its core, modshim works by installing a custom import finder (`ModShimFinder`) into `sys.meta_path`.

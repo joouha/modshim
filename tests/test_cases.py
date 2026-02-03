@@ -731,6 +731,52 @@ def test_modshim_frames_filtered_lower_module_error() -> None:
     )
 
 
+def test_third_party_import_rewriting() -> None:
+    """Test that the extras parameter rewrites imports in third-party modules."""
+    shim(
+        "tests.cases.third_party_lower",
+        "tests.cases.third_party_upper",
+        "tests.cases.third_party_mount",
+        extras=["tests.cases.third_party_consumer"],
+    )
+
+    # Import the consumer module - its imports should be rewritten
+    # from tests.cases.third_party_lower.mod to tests.cases.third_party_mount.mod
+    import tests.cases.third_party_consumer.user  # pyright: ignore [reportMissingImports]
+
+    # The consumer imports 'value' and 'name' from third_party_lower.mod
+    # After rewriting, it should get 'value' from the mount point (upper overrides to 200)
+    # 'name' is only in lower, so it stays as "lower"
+    assert tests.cases.third_party_consumer.user.value == 200
+    assert tests.cases.third_party_consumer.user.name == "lower"
+    assert tests.cases.third_party_consumer.user.computed == 250  # 200 + 50
+
+    # Verify the mount point module has attributes from both
+    import tests.cases.third_party_mount.mod  # pyright: ignore [reportMissingImports]
+
+    assert tests.cases.third_party_mount.mod.value == 200  # Upper overrides
+    assert tests.cases.third_party_mount.mod.name == "lower"  # From lower
+    assert tests.cases.third_party_mount.mod.extra_attr == "from_upper"  # From upper
+
+
+def test_third_party_import_rewriting_with_overmount() -> None:
+    """Test extras parameter when overmounting (mount == upper)."""
+    shim(
+        "tests.cases.third_party_lower",
+        "tests.cases.third_party_upper",
+        "tests.cases.third_party_upper",
+        extras=["tests.cases.third_party_consumer"],
+    )
+
+    import tests.cases.third_party_consumer.user  # pyright: ignore [reportMissingImports]
+
+    # After rewriting, the consumer should use third_party_upper (the mount point)
+    # which has value=200 from upper overriding lower's value=100
+    assert tests.cases.third_party_consumer.user.value == 200
+    assert tests.cases.third_party_consumer.user.name == "lower"
+    assert tests.cases.third_party_consumer.user.computed == 250
+
+
 def test_traceback_preserves_user_frames() -> None:
     """Test that user code frames are preserved while modshim frames are filtered."""
     shim(
