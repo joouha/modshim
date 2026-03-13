@@ -777,6 +777,28 @@ def test_third_party_import_rewriting_with_overmount() -> None:
     assert tests.cases.third_party_consumer.user.computed == 250
 
 
+def test_submodule_name_collision_does_not_import_wrong_module() -> None:
+    """Test that importing mount.filters.buffer doesn't accidentally load lower.buffer.
+
+    When upper shims over lower onto a mount point and upper has a submodule at
+    filters/buffer.py that doesn't exist in lower, modshim should NOT resolve
+    the name to lower.buffer (a top-level module) instead of
+    lower.filters.buffer (which doesn't exist). This would cause incorrect
+    imports and potential circular import errors.
+    """
+    try:
+        import tests.cases.submodule_name_collision_upper.sub.mod as fb  # pyright: ignore [reportMissingImports]
+    except RuntimeError as exc:
+        if "should not be imported" in str(exc):
+            raise AssertionError(
+                "Importing mount.filters.buffer incorrectly triggered "
+                "import of lower.buffer (top-level module name collision)"
+            ) from exc
+        raise
+
+    assert fb.value == 42
+
+
 def test_traceback_preserves_user_frames() -> None:
     """Test that user code frames are preserved while modshim frames are filtered."""
     shim(
