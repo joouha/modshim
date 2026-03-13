@@ -944,6 +944,11 @@ class ModShimFinder(MetaPathFinder):
                         if spec is not None:
                             path = spec.submodule_search_locations
                             break
+                    else:
+                        # A component in the chain was not found, so the
+                        # full lower_name does not exist.
+                        spec = None
+                        break
                 lower_spec = spec
             except (ImportError, AttributeError) as exc_lower:
                 lower_spec = None
