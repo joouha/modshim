@@ -1,5 +1,7 @@
 # modshim
 
+[![gitcgr](https://gitcgr.com/badge/joouha/modshim.svg)](https://gitcgr.com/joouha/modshim)
+
 A Python library for enhancing existing modules without modifying their source code - a clean alternative to forking, vendoring, and monkey-patching.
 
 ## Overview
