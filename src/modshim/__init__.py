@@ -573,18 +573,22 @@ class ModShimLoader(SourceFileLoader):
         if lower_spec := self.lower_spec:
             lower_filename = f"<modshim {fullname}::{lower_spec.origin}>"
 
-            source_code: str | None = None
-            rewritten_ast: ast.Module | None = None
-            was_rewritten = False
-
-            # Try to get cached code first
             code_obj: CodeType | None = None
-            no_rewrite = False
 
-            if code_obj is None:
-                # If cache indicates no rewrite needed, prefer native bytecode and skip AST work
+            source_code = get_module_source(lower_spec)
+            if source_code is not None:
+                source_len += len(source_code)
+                rules = [(self.lower_root, self.mount_root)]
+                # Rewrite the source to get an AST
+                (
+                    rewritten_ast,
+                    triggered_rules,
+                ) = self._rewrite_module_code(source_code, rules)
+                was_rewritten = bool(triggered_rules)
+
+                # If no rewrite was needed, try to get native code; otherwise compile
                 if (
-                    no_rewrite
+                    not was_rewritten
                     and lower_spec.loader
                     and isinstance(lower_spec.loader, InspectLoader)
                 ):
@@ -595,46 +599,16 @@ class ModShimLoader(SourceFileLoader):
                     if native_code:
                         code_obj = native_code
 
-                if code_obj is None:
-                    source_code = get_module_source(lower_spec)
-                    if source_code is not None:
-                        source_len += len(source_code)
-                        rules = [(self.lower_root, self.mount_root)]
-                        # Rewrite the source to get an AST
-                        (
-                            rewritten_ast,
-                            triggered_rules,
-                        ) = self._rewrite_module_code(source_code, rules)
-                        was_rewritten = bool(triggered_rules)
-
-                        # If no rewrite was needed, try to get native code; otherwise compile
-                        if (
-                            not was_rewritten
-                            and lower_spec.loader
-                            and isinstance(lower_spec.loader, InspectLoader)
-                        ):
-                            try:
-                                native_code = lower_spec.loader.get_code(lower_name)
-                            except (ImportError, AttributeError):
-                                native_code = None
-                            if native_code:
-                                code_obj = native_code
-
-                        if code_obj is None and rewritten_ast:
-                            code_obj = compile(
-                                rewritten_ast,
-                                lower_filename,
-                                "exec",
-                                optimize=sys.flags.optimize,
-                            )
+                if code_obj is None and rewritten_ast:
+                    code_obj = compile(
+                        rewritten_ast,
+                        lower_filename,
+                        "exec",
+                        optimize=sys.flags.optimize,
+                    )
 
             if code_obj is not None:
-                from io import BytesIO
-
-                with BytesIO() as f:
-                    marshal.dump(code_obj, f)
-                    f.seek(0)
-                    lower_code_bytes = f.read()
+                lower_code_bytes = marshal.dumps(code_obj)
 
         # Load and execute upper module
         if upper_spec := self.upper_spec:
@@ -643,64 +617,43 @@ class ModShimLoader(SourceFileLoader):
             working_name = ".".join([*parts[:-1], f"_working_{parts[-1]}"])
             upper_filename = f"<modshim {fullname}::{upper_spec.origin}>"
 
-            source_code: str | None = None
-            rewritten_ast: ast.Module | None = None
-            was_rewritten = False
-
-            # Try to get cached code first
             code_obj: CodeType | None = None
-            no_rewrite = False
 
-            # If cache indicates no rewrite needed, prefer native bytecode and skip AST work
-            if (
-                no_rewrite
-                and upper_spec.loader
-                and isinstance(upper_spec.loader, InspectLoader)
-            ):
-                try:
-                    native_code = upper_spec.loader.get_code(upper_name)
-                except (ImportError, AttributeError):
-                    native_code = None
-                if native_code:
-                    code_obj = native_code
-                    working_needed = False
+            source_code = get_module_source(upper_spec)
+            if source_code is not None:
+                source_len += len(source_code)
+                rules = [
+                    (self.lower_root, self.mount_root),
+                    (fullname, working_name),
+                    (self.upper_root, self.mount_root),
+                ]
+                (
+                    rewritten_ast,
+                    triggered_rules,
+                ) = self._rewrite_module_code(source_code, rules)
+                was_rewritten = bool(triggered_rules)
+                working_needed = 1 in triggered_rules
 
-            if code_obj is None:
-                source_code = get_module_source(upper_spec)
-                if source_code is not None:
-                    source_len += len(source_code)
-                    rules = [
-                        (self.lower_root, self.mount_root),
-                        (fullname, working_name),
-                        (self.upper_root, self.mount_root),
-                    ]
-                    (
+                # If no rewrite was needed, try to get native code; otherwise compile
+                if (
+                    not was_rewritten
+                    and upper_spec.loader
+                    and isinstance(upper_spec.loader, InspectLoader)
+                ):
+                    try:
+                        native_code = upper_spec.loader.get_code(upper_name)
+                    except (ImportError, AttributeError):
+                        native_code = None
+                    if native_code:
+                        code_obj = native_code
+
+                if code_obj is None and rewritten_ast:
+                    code_obj = compile(
                         rewritten_ast,
-                        triggered_rules,
-                    ) = self._rewrite_module_code(source_code, rules)
-                    was_rewritten = bool(triggered_rules)
-                    working_needed = 1 in triggered_rules
-
-                    # If no rewrite was needed, try to get native code; otherwise compile
-                    if (
-                        not was_rewritten
-                        and upper_spec.loader
-                        and isinstance(upper_spec.loader, InspectLoader)
-                    ):
-                        try:
-                            native_code = upper_spec.loader.get_code(upper_name)
-                        except (ImportError, AttributeError):
-                            native_code = None
-                        if native_code:
-                            code_obj = native_code
-
-                    if code_obj is None and rewritten_ast:
-                        code_obj = compile(
-                            rewritten_ast,
-                            upper_filename,
-                            "exec",
-                            optimize=sys.flags.optimize,
-                        )
+                        upper_filename,
+                        "exec",
+                        optimize=sys.flags.optimize,
+                    )
 
             if code_obj is not None:
                 upper_code_bytes = marshal.dumps(code_obj)
