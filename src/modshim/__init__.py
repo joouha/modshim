@@ -315,6 +315,23 @@ def get_module_source(spec: ModuleSpec) -> str | None:
         return None
 
 
+# Cache of computed rule hashes, keyed by the rule signature.
+_hash_cache: dict[str, str] = {}
+
+
+def _rules_hash(signature: str) -> str:
+    """Return a short, memoized MD5 hash for a rule signature string."""
+    cached = _hash_cache.get(signature)
+    if cached is not None:
+        return cached
+    digest = hashlib.md5(
+        signature.encode(),
+        usedforsecurity=False,
+    ).hexdigest()[:8]
+    _hash_cache[signature] = digest
+    return digest
+
+
 def _preflight_needs_rewrite(code: str, rules: list[tuple[str, str]]) -> bool:
     """Avoid AST parsing when not needed with string-based-matching.
 
@@ -351,11 +368,8 @@ class ExtrasLoader(SourceFileLoader):
         self.fullname = fullname
         self.original_spec = original_spec
         self.rules = rules
-        # Compute a hash of the rules for cache isolation
-        self.hash = hashlib.md5(
-            "\n".join(",".join(rule) for rule in sorted(rules)).encode(),
-            usedforsecurity=False,
-        ).hexdigest()[:8]
+        # Compute a hash of the rules for cache isolation (memoized)
+        self.hash = _rules_hash("\n".join(",".join(rule) for rule in sorted(rules)))
         # Initialize parent with the original path
         origin = original_spec.origin or ""
         super().__init__(fullname, origin)
@@ -473,11 +487,8 @@ class ModShimLoader(SourceFileLoader):
         self.finder: ModShimFinder = finder
         self.upper_root_origin = ""
 
-        # Compute a hash of the rules for cache isolation
-        self.hash = hashlib.md5(
-            f"{lower_root},{mount_root}\n{upper_root},{mount_root}".encode(),
-            usedforsecurity=False,
-        ).hexdigest()[:8]
+        # Compute a hash of the rules for cache isolation (memoized)
+        self.hash = _rules_hash(f"{lower_root},{mount_root}\n{upper_root},{mount_root}")
 
         # Set flag indicating we are performing an internal lookup
         finder._internal_call.active = True
