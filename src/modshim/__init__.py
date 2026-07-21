@@ -324,7 +324,7 @@ def _preflight_needs_rewrite(code: str, rules: list[tuple[str, str]]) -> bool:
     if not rules:
         return False
     # Check for exact names and dotted-prefix references
-    return any(search in code or f"{search}." in code for search, _replace in rules)
+    return any(search in code for search, _replace in rules)
 
 
 class ExtrasLoader(SourceFileLoader):
