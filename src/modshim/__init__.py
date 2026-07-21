@@ -434,12 +434,7 @@ class ExtrasLoader(SourceFileLoader):
             optimize=sys.flags.optimize,
         )
 
-        from io import BytesIO
-
-        with BytesIO() as f:
-            marshal.dump(code_obj, f)
-            f.seek(0)
-            code_bytes = f.read()
+        code_bytes = marshal.dumps(code_obj)
 
         # Return a script that executes the marshaled bytecode
         script = f"import marshal\nexec(marshal.loads({code_bytes!r}))\n"
@@ -708,12 +703,7 @@ class ModShimLoader(SourceFileLoader):
                         )
 
             if code_obj is not None:
-                from io import BytesIO
-
-                with BytesIO() as f:
-                    marshal.dump(code_obj, f)
-                    f.seek(0)
-                    upper_code_bytes = f.read()
+                upper_code_bytes = marshal.dumps(code_obj)
 
         # Build a cacheable Python script to execute both upper and lower
         code = "import marshal\n"
