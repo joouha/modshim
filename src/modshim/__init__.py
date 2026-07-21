@@ -556,10 +556,11 @@ class ModShimLoader(SourceFileLoader):
             with io.open_code(str(path)) as file:
                 return file.read()
 
-        # Calculate upper and lower names
+        # Calculate upper and lower names (prefix-only replacement)
         fullname = self.fullname
-        lower_name = fullname.replace(self.mount_root, self.lower_root)
-        upper_name = fullname.replace(self.mount_root, self.upper_root)
+        suffix = fullname[len(self.mount_root) :]
+        lower_name = self.lower_root + suffix
+        upper_name = self.upper_root + suffix
 
         # source_path = self.get_filename(fullname)
 
